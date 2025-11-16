@@ -1,0 +1,97 @@
+{
+  "identificacao": {
+    "codigoUF": "35",
+    "naturezaOperacao": "VENDA DE PRODUTOS",
+    "modelo": "55",
+    "serie": "1",
+    "numeroNota": 1,
+    "dataEmissao": "2024-01-15T10:30:00-03:00",
+    "dataSaidaEntrada": "2024-01-15T10:30:00-03:00",
+    "tipoOperacao": "1",
+    "codigoMunicipioFatoGerador": "3550308",
+    "tipoImpressao": "1",
+    "tipoEmissao": "1",
+    "ambiente": "2",
+    "finalidade": "1",
+    "indicadorConsumidorFinal": "0",
+    "indicadorPresenca": "1"
+  },
+  "emitente": {
+    "cnpj": "12345678000195",
+    "razaoSocial": "EMPRESA EXEMPLO LTDA",
+    "nomeFantasia": "EXEMPLO LTDA",
+    "inscricaoEstadual": "123456789012",
+    "codigoRegimeTributario": "1",
+    "endereco": {
+      "logradouro": "RUA DAS FLORES",
+      "numero": "123",
+      "complemento": null,
+      "bairro": "CENTRO",
+      "codigoMunicipio": "3550308",
+      "nomeMunicipio": "SAO PAULO",
+      "uf": "SP",
+      "cep": "01000000",
+      "telefone": "1133334444"
+    }
+  },
+  "destinatario": {
+    "tipo": "PJ",
+    "documento": "11222333000181",
+    "nomeRazaoSocial": "CLIENTE EXEMPLO LTDA",
+    "indicadorIE": "1",
+    "inscricaoEstadual": "987654321098",
+    "endereco": {
+      "logradouro": "AVENIDA PRINCIPAL",
+      "numero": "456",
+      "complemento": null,
+      "bairro": "JARDIM AMERICA",
+      "codigoMunicipio": "3550308",
+      "nomeMunicipio": "SAO PAULO",
+      "uf": "SP",
+      "cep": "02000000",
+      "telefone": "1199998888"
+    }
+  },
+  "produtos": [
+    {
+      "codigo": "001",
+      "ean": "7891234567890",
+      "descricao": "PRODUTO EXEMPLO",
+      "ncm": "84713012",
+      "cfop": "5102",
+      "unidadeComercial": "UN",
+      "quantidadeComercial": 10.0,
+      "valorUnitarioComercial": 100.0,
+      "valorTotal": 1000.0,
+      "unidadeTributavel": "UN",
+      "quantidadeTributavel": 10.0,
+      "valorUnitarioTributavel": 100.0,
+      "valorFrete": 0.0,
+      "valorSeguro": 0.0,
+      "valorDesconto": 0.0,
+      "valorOutros": 0.0,
+      "indicadorTotal": "1"
+    }
+  ],
+  "transporte": {
+    "modalidadeFrete": "0",
+    "transportadora": null
+  },
+  "cobranca": {
+    "fatura": {
+      "numero": "000001",
+      "valorOriginal": 1000.0,
+      "valorDesconto": 0.0,
+      "valorLiquido": 1000.0
+    },
+    "duplicatas": [
+      {
+        "numero": "001",
+        "dataVencimento": "2024-02-15",
+        "valor": 1000.0
+      }
+    ]
+  },
+  "informacoesAdicionais": "NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL"
+}
+
