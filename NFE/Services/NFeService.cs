@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using System.Xml.Schema;
+using System.Xml;
 
 namespace NFE.Services
 {
@@ -37,6 +39,16 @@ namespace NFE.Services
         private static string FormatarValor4Casas(decimal valor)
         {
             return valor.ToString("F4", InvariantCulture);
+        }
+
+        /// <summary>
+        /// Formata data/hora para formato UTC conforme schema (AAAA-MM-DDThh:mm:ssTZD)
+        /// </summary>
+        private static string FormatarDataHoraUTC(DateTime data)
+        {
+            var offset = TimeZoneInfo.Local.GetUtcOffset(data);
+            var offsetString = $"{(offset.Hours >= 0 ? "+" : "-")}{Math.Abs(offset.Hours):D2}:{Math.Abs(offset.Minutes):D2}";
+            return data.ToString("yyyy-MM-ddTHH:mm:ss", InvariantCulture) + offsetString;
         }
 
         public async Task<NFeResponseViewModel> ProcessarNFeAsync(NFeViewModel model, string ambiente)
@@ -231,11 +243,79 @@ namespace NFE.Services
             {
                 try
                 {
-                    XDocument.Parse(xml);
+                    // Primeiro verifica se está bem formado
+                    var doc = XDocument.Parse(xml);
+                    
+                    // Carrega schemas XSD
+                    var schemas = new XmlSchemaSet();
+                    
+                    // Tenta diferentes caminhos para encontrar os schemas
+                    var currentDir = Directory.GetCurrentDirectory();
+                    var possiblePaths = new[]
+                    {
+                        Path.Combine(currentDir, "leiautes"),
+                        Path.Combine(currentDir, "..", "leiautes"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "leiautes"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "leiautes"),
+                        Path.GetFullPath(Path.Combine(currentDir, "..", "leiautes"))
+                    };
+
+                    string? schemasPath = null;
+                    foreach (var path in possiblePaths)
+                    {
+                        var testPath = Path.Combine(path, "nfe_v4.00.xsd");
+                        if (File.Exists(testPath))
+                        {
+                            schemasPath = path;
+                            break;
+                        }
+                    }
+
+                    if (schemasPath == null)
+                    {
+                        _logger.LogWarning("Schemas XSD não encontrados. Validação XSD será ignorada.");
+                        return true; // Retorna true se não encontrar schemas (compatibilidade)
+                    }
+                    
+                    // Carrega schemas na ordem correta (dependências primeiro)
+                    schemas.Add("http://www.w3.org/2000/09/xmldsig#", 
+                        Path.Combine(schemasPath, "xmldsig-core-schema_v1.01.xsd"));
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+                        Path.Combine(schemasPath, "tiposBasico_v4.00.xsd"));
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+                        Path.Combine(schemasPath, "DFeTiposBasicos_v1.00.xsd"));
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+                        Path.Combine(schemasPath, "leiauteNFe_v4.00.xsd"));
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+                        Path.Combine(schemasPath, "nfe_v4.00.xsd"));
+
+                    // Valida XML contra schemas
+                    var validationErrors = new List<string>();
+                    doc.Validate(schemas, (sender, args) =>
+                    {
+                        if (args.Severity == XmlSeverityType.Error)
+                        {
+                            var errorMsg = $"Erro de validação XSD: {args.Message} - Linha: {args.Exception?.LineNumber}, Posição: {args.Exception?.LinePosition}";
+                            _logger.LogError(errorMsg);
+                            validationErrors.Add(errorMsg);
+                        }
+                    });
+
+                    if (validationErrors.Any())
+                    {
+                        throw new XmlException(string.Join("; ", validationErrors));
+                    }
+
                     return true;
                 }
-                catch
+                catch (XmlException ex)
                 {
+                    _logger.LogError(ex, "Erro ao validar XML contra schemas XSD");
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro inesperado ao validar XML");
                     return false;
                 }
             });
@@ -279,25 +359,62 @@ namespace NFE.Services
             var ide = model.Identificacao;
             var ideElement = new XElement(ns + "ide");
 
+            // Calcula cDV corretamente
+            var chaveAcesso = GerarIdNFe(model).Replace("NFe", "");
+            var cDV = chaveAcesso.Substring(chaveAcesso.Length - 1);
+
             ideElement.Add(new XElement(ns + "cUF", ide.CodigoUF));
             ideElement.Add(new XElement(ns + "cNF", new Random().Next(10000000, 99999999).ToString()));
             ideElement.Add(new XElement(ns + "natOp", ide.NaturezaOperacao));
             ideElement.Add(new XElement(ns + "mod", ide.Modelo));
             ideElement.Add(new XElement(ns + "serie", ide.Serie));
             ideElement.Add(new XElement(ns + "nNF", ide.NumeroNota));
-            ideElement.Add(new XElement(ns + "dhEmi", ide.DataEmissao.ToString("yyyy-MM-ddTHH:mm:sszzz")));
-            ideElement.Add(new XElement(ns + "dhSaiEnt", ide.DataSaidaEntrada.ToString("yyyy-MM-ddTHH:mm:sszzz")));
+            ideElement.Add(new XElement(ns + "dhEmi", FormatarDataHoraUTC(ide.DataEmissao)));
+            
+            if (ide.DataSaidaEntrada != default)
+            {
+                ideElement.Add(new XElement(ns + "dhSaiEnt", FormatarDataHoraUTC(ide.DataSaidaEntrada)));
+            }
+
+            if (ide.DataPrevisaoEntrega.HasValue)
+            {
+                ideElement.Add(new XElement(ns + "dPrevEntrega", ide.DataPrevisaoEntrega.Value.ToString("yyyy-MM-dd")));
+            }
+
             ideElement.Add(new XElement(ns + "tpNF", ide.TipoOperacao));
-            ideElement.Add(new XElement(ns + "idDest", "1"));
+            ideElement.Add(new XElement(ns + "idDest", ide.IdentificadorLocalDestino));
             ideElement.Add(new XElement(ns + "cMunFG", ide.CodigoMunicipioFatoGerador));
+            
+            if (!string.IsNullOrEmpty(ide.CodigoMunicipioFGIBS))
+            {
+                ideElement.Add(new XElement(ns + "cMunFGIBS", ide.CodigoMunicipioFGIBS));
+            }
+
             ideElement.Add(new XElement(ns + "tpImp", ide.TipoImpressao));
             ideElement.Add(new XElement(ns + "tpEmis", ide.TipoEmissao));
-            ideElement.Add(new XElement(ns + "cDV", "0"));
+            ideElement.Add(new XElement(ns + "cDV", cDV));
             ideElement.Add(new XElement(ns + "tpAmb", ide.Ambiente));
             ideElement.Add(new XElement(ns + "finNFe", ide.Finalidade));
+            
+            if (!string.IsNullOrEmpty(ide.TipoNFDebito))
+            {
+                ideElement.Add(new XElement(ns + "tpNFDebito", ide.TipoNFDebito));
+            }
+
+            if (!string.IsNullOrEmpty(ide.TipoNFCredito))
+            {
+                ideElement.Add(new XElement(ns + "tpNFCredito", ide.TipoNFCredito));
+            }
+
             ideElement.Add(new XElement(ns + "indFinal", ide.IndicadorConsumidorFinal));
             ideElement.Add(new XElement(ns + "indPres", ide.IndicadorPresenca));
-            ideElement.Add(new XElement(ns + "procEmi", "0"));
+            
+            if (!string.IsNullOrEmpty(ide.IndicadorIntermediador))
+            {
+                ideElement.Add(new XElement(ns + "indIntermed", ide.IndicadorIntermediador));
+            }
+
+            ideElement.Add(new XElement(ns + "procEmi", ide.ProcessoEmissao));
             ideElement.Add(new XElement(ns + "verProc", "API NFe MVC v1.0"));
 
             return ideElement;
@@ -414,7 +531,7 @@ namespace NFE.Services
 
             det.Add(prod);
 
-            // imposto (simplificado)
+            // imposto
             var imposto = CriarImposto(produto, ns);
             det.Add(imposto);
 
@@ -468,6 +585,20 @@ namespace NFE.Services
 
             imposto.Add(new XElement(ns + "vTotTrib", FormatarValor(valorProduto * 0.18m)));
 
+            // IS (Imposto Seletivo) - opcional
+            if (produto.ImpostoSeletivo != null)
+            {
+                var isElement = CriarImpostoSeletivo(produto.ImpostoSeletivo, ns);
+                imposto.Add(isElement);
+            }
+
+            // IBSCBS - Reforma Tributária 2026
+            if (produto.IBSCBS != null)
+            {
+                var ibscbsElement = CriarIBSCBS(produto.IBSCBS, ns);
+                imposto.Add(ibscbsElement);
+            }
+
             return imposto;
         }
 
@@ -501,6 +632,20 @@ namespace NFE.Services
             icmsTot.Add(new XElement(ns + "vTotTrib", FormatarValor(valorTotal * 0.18m)));
 
             total.Add(icmsTot);
+
+            // IBSCBSTot - Reforma Tributária 2026
+            if (model.IBSCBSTot != null)
+            {
+                var ibscbsTot = CriarIBSCBSTot(model.IBSCBSTot, ns);
+                total.Add(ibscbsTot);
+            }
+
+            // vNFTot - Valor Total com impostos por fora
+            if (model.ValorNFTot.HasValue)
+            {
+                total.Add(new XElement(ns + "vNFTot", FormatarValor(model.ValorNFTot.Value)));
+            }
+
             return total;
         }
 
@@ -572,6 +717,367 @@ namespace NFE.Services
             }
 
             return cobr;
+        }
+
+        private XElement CriarImpostoSeletivo(ISViewModel isModel, XNamespace ns)
+        {
+            var isElement = new XElement(ns + "IS");
+            isElement.Add(new XElement(ns + "CSTIS", isModel.CSTIS));
+            isElement.Add(new XElement(ns + "cClassTribIS", isModel.CodigoClassificacaoTributariaIS));
+
+            if (isModel.ValorBaseCalculoIS.HasValue && isModel.AliquotaIS.HasValue && isModel.ValorIS.HasValue)
+            {
+                isElement.Add(new XElement(ns + "vBCIS", FormatarValor(isModel.ValorBaseCalculoIS.Value)));
+                isElement.Add(new XElement(ns + "pIS", FormatarValor(isModel.AliquotaIS.Value, 4)));
+
+                if (isModel.AliquotaISEspecifica.HasValue)
+                {
+                    isElement.Add(new XElement(ns + "pISEspec", FormatarValor(isModel.AliquotaISEspecifica.Value, 4)));
+                }
+
+                if (!string.IsNullOrEmpty(isModel.UnidadeTributaria) && isModel.QuantidadeTributaria.HasValue)
+                {
+                    isElement.Add(new XElement(ns + "uTrib", isModel.UnidadeTributaria));
+                    isElement.Add(new XElement(ns + "qTrib", FormatarValor4Casas(isModel.QuantidadeTributaria.Value)));
+                }
+
+                isElement.Add(new XElement(ns + "vIS", FormatarValor(isModel.ValorIS.Value)));
+            }
+
+            return isElement;
+        }
+
+        private XElement CriarIBSCBS(IBSCBSViewModel ibscbs, XNamespace ns)
+        {
+            var ibscbsElement = new XElement(ns + "IBSCBS");
+            ibscbsElement.Add(new XElement(ns + "CST", ibscbs.CST));
+            ibscbsElement.Add(new XElement(ns + "cClassTrib", ibscbs.CodigoClassificacaoTributaria));
+
+            if (!string.IsNullOrEmpty(ibscbs.IndicadorDoacao))
+            {
+                ibscbsElement.Add(new XElement(ns + "indDoacao", ibscbs.IndicadorDoacao));
+            }
+
+            // Choice: gIBSCBS, gIBSCBSMono, gTransfCred, gAjusteCompet
+            if (ibscbs.GrupoIBSCBS != null)
+            {
+                var grupo = CriarGrupoIBSCBS(ibscbs.GrupoIBSCBS, ns);
+                ibscbsElement.Add(grupo);
+            }
+            else if (ibscbs.GrupoIBSCBSMonofasia != null)
+            {
+                var grupo = CriarGrupoIBSCBSMonofasia(ibscbs.GrupoIBSCBSMonofasia, ns);
+                ibscbsElement.Add(grupo);
+            }
+            else if (ibscbs.GrupoTransferenciaCredito != null)
+            {
+                var grupo = new XElement(ns + "gTransfCred");
+                grupo.Add(new XElement(ns + "vIBS", FormatarValor(ibscbs.GrupoTransferenciaCredito.ValorIBSTransferir)));
+                grupo.Add(new XElement(ns + "vCBS", FormatarValor(ibscbs.GrupoTransferenciaCredito.ValorCBSTransferir)));
+                ibscbsElement.Add(grupo);
+            }
+            else if (ibscbs.GrupoAjusteCompetencia != null)
+            {
+                var grupo = new XElement(ns + "gAjusteCompet");
+                grupo.Add(new XElement(ns + "competApur", ibscbs.GrupoAjusteCompetencia.CompetenciaApuracao));
+                grupo.Add(new XElement(ns + "vIBS", FormatarValor(ibscbs.GrupoAjusteCompetencia.ValorIBS)));
+                grupo.Add(new XElement(ns + "vCBS", FormatarValor(ibscbs.GrupoAjusteCompetencia.ValorCBS)));
+                ibscbsElement.Add(grupo);
+            }
+
+            if (ibscbs.GrupoEstornoCredito != null)
+            {
+                var grupo = new XElement(ns + "gEstornoCred");
+                grupo.Add(new XElement(ns + "vIBSEstCred", FormatarValor(ibscbs.GrupoEstornoCredito.ValorIBSEstornar)));
+                grupo.Add(new XElement(ns + "vCBSEstCred", FormatarValor(ibscbs.GrupoEstornoCredito.ValorCBSEstornar)));
+                ibscbsElement.Add(grupo);
+            }
+
+            // Choice: gCredPresOper, gCredPresIBSZFM
+            if (ibscbs.GrupoCreditoPresumidoOperacao != null)
+            {
+                var grupo = CriarGrupoCreditoPresumidoOperacao(ibscbs.GrupoCreditoPresumidoOperacao, ns);
+                ibscbsElement.Add(grupo);
+            }
+            else if (ibscbs.GrupoCreditoPresumidoIBSZFM != null)
+            {
+                var grupo = new XElement(ns + "gCredPresIBSZFM");
+                grupo.Add(new XElement(ns + "competApur", ibscbs.GrupoCreditoPresumidoIBSZFM.CompetenciaApuracao));
+                grupo.Add(new XElement(ns + "tpCredPresIBSZFM", ibscbs.GrupoCreditoPresumidoIBSZFM.TipoCreditoPresumidoIBSZFM));
+                grupo.Add(new XElement(ns + "vCredPresIBSZFM", FormatarValor(ibscbs.GrupoCreditoPresumidoIBSZFM.ValorCreditoPresumidoIBSZFM)));
+                ibscbsElement.Add(grupo);
+            }
+
+            return ibscbsElement;
+        }
+
+        private XElement CriarGrupoIBSCBS(IBSCBSGrupoViewModel grupo, XNamespace ns)
+        {
+            var gElement = new XElement(ns + "gIBSCBS");
+            gElement.Add(new XElement(ns + "vBC", FormatarValor(grupo.ValorBaseCalculo)));
+
+            // gIBSUF
+            var gIBSUF = new XElement(ns + "gIBSUF");
+            gIBSUF.Add(new XElement(ns + "pIBSUF", FormatarValor(grupo.GrupoIBSUF.AliquotaIBSUF, 4)));
+
+            if (grupo.GrupoIBSUF.GrupoDiferimento != null)
+            {
+                var gDif = new XElement(ns + "gDif");
+                gDif.Add(new XElement(ns + "pDif", FormatarValor(grupo.GrupoIBSUF.GrupoDiferimento.PercentualDiferimento, 4)));
+                gDif.Add(new XElement(ns + "vDif", FormatarValor(grupo.GrupoIBSUF.GrupoDiferimento.ValorDiferimento)));
+                gIBSUF.Add(gDif);
+            }
+
+            if (grupo.GrupoIBSUF.GrupoDevolucaoTributo != null)
+            {
+                var gDevTrib = new XElement(ns + "gDevTrib");
+                gDevTrib.Add(new XElement(ns + "vDevTrib", FormatarValor(grupo.GrupoIBSUF.GrupoDevolucaoTributo.ValorDevolucaoTributo)));
+                gIBSUF.Add(gDevTrib);
+            }
+
+            if (grupo.GrupoIBSUF.GrupoReducaoAliquota != null)
+            {
+                var gRed = new XElement(ns + "gRed");
+                gRed.Add(new XElement(ns + "pRedAliq", FormatarValor(grupo.GrupoIBSUF.GrupoReducaoAliquota.PercentualReducaoAliquota, 4)));
+                gRed.Add(new XElement(ns + "pAliqEfet", FormatarValor(grupo.GrupoIBSUF.GrupoReducaoAliquota.AliquotaEfetiva, 4)));
+                gIBSUF.Add(gRed);
+            }
+
+            gIBSUF.Add(new XElement(ns + "vIBSUF", FormatarValor(grupo.GrupoIBSUF.ValorIBSUF)));
+            gElement.Add(gIBSUF);
+
+            // gIBSMun
+            var gIBSMun = new XElement(ns + "gIBSMun");
+            gIBSMun.Add(new XElement(ns + "pIBSMun", FormatarValor(grupo.GrupoIBSMunicipio.AliquotaIBSMunicipio, 4)));
+
+            if (grupo.GrupoIBSMunicipio.GrupoDiferimento != null)
+            {
+                var gDif = new XElement(ns + "gDif");
+                gDif.Add(new XElement(ns + "pDif", FormatarValor(grupo.GrupoIBSMunicipio.GrupoDiferimento.PercentualDiferimento, 4)));
+                gDif.Add(new XElement(ns + "vDif", FormatarValor(grupo.GrupoIBSMunicipio.GrupoDiferimento.ValorDiferimento)));
+                gIBSMun.Add(gDif);
+            }
+
+            if (grupo.GrupoIBSMunicipio.GrupoDevolucaoTributo != null)
+            {
+                var gDevTrib = new XElement(ns + "gDevTrib");
+                gDevTrib.Add(new XElement(ns + "vDevTrib", FormatarValor(grupo.GrupoIBSMunicipio.GrupoDevolucaoTributo.ValorDevolucaoTributo)));
+                gIBSMun.Add(gDevTrib);
+            }
+
+            if (grupo.GrupoIBSMunicipio.GrupoReducaoAliquota != null)
+            {
+                var gRed = new XElement(ns + "gRed");
+                gRed.Add(new XElement(ns + "pRedAliq", FormatarValor(grupo.GrupoIBSMunicipio.GrupoReducaoAliquota.PercentualReducaoAliquota, 4)));
+                gRed.Add(new XElement(ns + "pAliqEfet", FormatarValor(grupo.GrupoIBSMunicipio.GrupoReducaoAliquota.AliquotaEfetiva, 4)));
+                gIBSMun.Add(gRed);
+            }
+
+            gIBSMun.Add(new XElement(ns + "vIBSMun", FormatarValor(grupo.GrupoIBSMunicipio.ValorIBSMunicipio)));
+            gElement.Add(gIBSMun);
+
+            gElement.Add(new XElement(ns + "vIBS", FormatarValor(grupo.ValorIBS)));
+
+            // gCBS
+            var gCBS = new XElement(ns + "gCBS");
+            gCBS.Add(new XElement(ns + "pCBS", FormatarValor(grupo.GrupoCBS.AliquotaCBS, 4)));
+
+            if (grupo.GrupoCBS.GrupoDiferimento != null)
+            {
+                var gDif = new XElement(ns + "gDif");
+                gDif.Add(new XElement(ns + "pDif", FormatarValor(grupo.GrupoCBS.GrupoDiferimento.PercentualDiferimento, 4)));
+                gDif.Add(new XElement(ns + "vDif", FormatarValor(grupo.GrupoCBS.GrupoDiferimento.ValorDiferimento)));
+                gCBS.Add(gDif);
+            }
+
+            if (grupo.GrupoCBS.GrupoDevolucaoTributo != null)
+            {
+                var gDevTrib = new XElement(ns + "gDevTrib");
+                gDevTrib.Add(new XElement(ns + "vDevTrib", FormatarValor(grupo.GrupoCBS.GrupoDevolucaoTributo.ValorDevolucaoTributo)));
+                gCBS.Add(gDevTrib);
+            }
+
+            if (grupo.GrupoCBS.GrupoReducaoAliquota != null)
+            {
+                var gRed = new XElement(ns + "gRed");
+                gRed.Add(new XElement(ns + "pRedAliq", FormatarValor(grupo.GrupoCBS.GrupoReducaoAliquota.PercentualReducaoAliquota, 4)));
+                gRed.Add(new XElement(ns + "pAliqEfet", FormatarValor(grupo.GrupoCBS.GrupoReducaoAliquota.AliquotaEfetiva, 4)));
+                gCBS.Add(gRed);
+            }
+
+            gCBS.Add(new XElement(ns + "vCBS", FormatarValor(grupo.GrupoCBS.ValorCBS)));
+            gElement.Add(gCBS);
+
+            return gElement;
+        }
+
+        private XElement CriarGrupoIBSCBSMonofasia(IBSCBSMonofasiaViewModel grupo, XNamespace ns)
+        {
+            var gElement = new XElement(ns + "gIBSCBSMono");
+
+            if (grupo.GrupoMonofasiaPadrao != null)
+            {
+                var gMonoPadrao = new XElement(ns + "gMonoPadrao");
+                gMonoPadrao.Add(new XElement(ns + "qBCMono", FormatarValor4Casas(grupo.GrupoMonofasiaPadrao.QuantidadeTributada)));
+                gMonoPadrao.Add(new XElement(ns + "adRemIBS", FormatarValor(grupo.GrupoMonofasiaPadrao.AliquotaAdRemIBS, 4)));
+                gMonoPadrao.Add(new XElement(ns + "adRemCBS", FormatarValor(grupo.GrupoMonofasiaPadrao.AliquotaAdRemCBS, 4)));
+                gMonoPadrao.Add(new XElement(ns + "vIBSMono", FormatarValor(grupo.GrupoMonofasiaPadrao.ValorIBSMonofasico)));
+                gMonoPadrao.Add(new XElement(ns + "vCBSMono", FormatarValor(grupo.GrupoMonofasiaPadrao.ValorCBSMonofasica)));
+                gElement.Add(gMonoPadrao);
+            }
+
+            if (grupo.GrupoMonofasiaRetencao != null)
+            {
+                var gMonoReten = new XElement(ns + "gMonoReten");
+                gMonoReten.Add(new XElement(ns + "qBCMonoReten", FormatarValor4Casas(grupo.GrupoMonofasiaRetencao.QuantidadeTributadaRetencao)));
+                gMonoReten.Add(new XElement(ns + "adRemIBSReten", FormatarValor(grupo.GrupoMonofasiaRetencao.AliquotaAdRemIBSRetencao, 4)));
+                gMonoReten.Add(new XElement(ns + "vIBSMonoReten", FormatarValor(grupo.GrupoMonofasiaRetencao.ValorIBSMonofasicoRetencao)));
+                gMonoReten.Add(new XElement(ns + "adRemCBSReten", FormatarValor(grupo.GrupoMonofasiaRetencao.AliquotaAdRemCBSRetencao, 4)));
+                gMonoReten.Add(new XElement(ns + "vCBSMonoReten", FormatarValor(grupo.GrupoMonofasiaRetencao.ValorCBSMonofasicaRetencao)));
+                gElement.Add(gMonoReten);
+            }
+
+            if (grupo.GrupoMonofasiaRetidoAnteriormente != null)
+            {
+                var gMonoRet = new XElement(ns + "gMonoRet");
+                gMonoRet.Add(new XElement(ns + "qBCMonoRet", FormatarValor4Casas(grupo.GrupoMonofasiaRetidoAnteriormente.QuantidadeTributadaRetida)));
+                gMonoRet.Add(new XElement(ns + "adRemIBSRet", FormatarValor(grupo.GrupoMonofasiaRetidoAnteriormente.AliquotaAdRemIBSRetido, 4)));
+                gMonoRet.Add(new XElement(ns + "vIBSMonoRet", FormatarValor(grupo.GrupoMonofasiaRetidoAnteriormente.ValorIBSRetidoAnteriormente)));
+                gMonoRet.Add(new XElement(ns + "adRemCBSRet", FormatarValor(grupo.GrupoMonofasiaRetidoAnteriormente.AliquotaAdRemCBSRetida, 4)));
+                gMonoRet.Add(new XElement(ns + "vCBSMonoRet", FormatarValor(grupo.GrupoMonofasiaRetidoAnteriormente.ValorCBSRetidaAnteriormente)));
+                gElement.Add(gMonoRet);
+            }
+
+            if (grupo.GrupoMonofasiaDiferimento != null)
+            {
+                var gMonoDif = new XElement(ns + "gMonoDif");
+                gMonoDif.Add(new XElement(ns + "pDifIBS", FormatarValor(grupo.GrupoMonofasiaDiferimento.PercentualDiferimentoIBS, 4)));
+                gMonoDif.Add(new XElement(ns + "vIBSMonoDif", FormatarValor(grupo.GrupoMonofasiaDiferimento.ValorIBSMonofasicoDiferido)));
+                gMonoDif.Add(new XElement(ns + "pDifCBS", FormatarValor(grupo.GrupoMonofasiaDiferimento.PercentualDiferimentoCBS, 4)));
+                gMonoDif.Add(new XElement(ns + "vCBSMonoDif", FormatarValor(grupo.GrupoMonofasiaDiferimento.ValorCBSMonofasicaDiferida)));
+                gElement.Add(gMonoDif);
+            }
+
+            gElement.Add(new XElement(ns + "vTotIBSMonoItem", FormatarValor(grupo.TotalIBSMonofasicoItem)));
+            gElement.Add(new XElement(ns + "vTotCBSMonoItem", FormatarValor(grupo.TotalCBSMonofasicaItem)));
+
+            return gElement;
+        }
+
+        private XElement CriarGrupoCreditoPresumidoOperacao(CreditoPresumidoOperacaoViewModel grupo, XNamespace ns)
+        {
+            var gElement = new XElement(ns + "gCredPresOper");
+            gElement.Add(new XElement(ns + "vBCCredPres", FormatarValor(grupo.ValorBaseCalculoCreditoPresumido)));
+            gElement.Add(new XElement(ns + "cCredPres", grupo.CodigoCreditoPresumido));
+
+            if (grupo.GrupoIBSCreditoPresumido != null)
+            {
+                var gIBSCredPres = CriarCreditoPresumido(grupo.GrupoIBSCreditoPresumido, ns);
+                var gIBSCredPresElement = new XElement(ns + "gIBSCredPres");
+                foreach (var child in gIBSCredPres.Elements())
+                {
+                    gIBSCredPresElement.Add(child);
+                }
+                gElement.Add(gIBSCredPresElement);
+            }
+
+            if (grupo.GrupoCBSCreditoPresumido != null)
+            {
+                var gCBSCredPres = CriarCreditoPresumido(grupo.GrupoCBSCreditoPresumido, ns);
+                var gCBSCredPresElement = new XElement(ns + "gCBSCredPres");
+                foreach (var child in gCBSCredPres.Elements())
+                {
+                    gCBSCredPresElement.Add(child);
+                }
+                gElement.Add(gCBSCredPresElement);
+            }
+
+            return gElement;
+        }
+
+        private XElement CriarCreditoPresumido(CreditoPresumidoViewModel credito, XNamespace ns)
+        {
+            var gElement = new XElement(ns + "gCredPres");
+            gElement.Add(new XElement(ns + "pCredPres", FormatarValor(credito.PercentualCreditoPresumido, 4)));
+
+            if (credito.ValorCreditoPresumido.HasValue)
+            {
+                gElement.Add(new XElement(ns + "vCredPres", FormatarValor(credito.ValorCreditoPresumido.Value)));
+            }
+            else if (credito.ValorCreditoPresumidoCondicaoSuspensiva.HasValue)
+            {
+                gElement.Add(new XElement(ns + "vCredPresCondSus", FormatarValor(credito.ValorCreditoPresumidoCondicaoSuspensiva.Value)));
+            }
+
+            return gElement;
+        }
+
+        private XElement CriarIBSCBSTot(IBSCBSTotViewModel tot, XNamespace ns)
+        {
+            var totElement = new XElement(ns + "IBSCBSTot");
+            totElement.Add(new XElement(ns + "vBCIBSCBS", FormatarValor(tot.ValorBaseCalculoIBSCBS)));
+
+            if (tot.GrupoIBSTot != null)
+            {
+                var gIBS = new XElement(ns + "gIBS");
+                
+                var gIBSUF = new XElement(ns + "gIBSUF");
+                gIBSUF.Add(new XElement(ns + "vDif", FormatarValor(tot.GrupoIBSTot.GrupoIBSUF.ValorDiferimento)));
+                gIBSUF.Add(new XElement(ns + "vDevTrib", FormatarValor(tot.GrupoIBSTot.GrupoIBSUF.ValorDevolucaoTributos)));
+                gIBSUF.Add(new XElement(ns + "vIBSUF", FormatarValor(tot.GrupoIBSTot.GrupoIBSUF.ValorIBSUF)));
+                gIBS.Add(gIBSUF);
+
+                var gIBSMun = new XElement(ns + "gIBSMun");
+                gIBSMun.Add(new XElement(ns + "vDif", FormatarValor(tot.GrupoIBSTot.GrupoIBSMunicipio.ValorDiferimento)));
+                gIBSMun.Add(new XElement(ns + "vDevTrib", FormatarValor(tot.GrupoIBSTot.GrupoIBSMunicipio.ValorDevolucaoTributos)));
+                gIBSMun.Add(new XElement(ns + "vIBSMun", FormatarValor(tot.GrupoIBSTot.GrupoIBSMunicipio.ValorIBSMunicipio)));
+                gIBS.Add(gIBSMun);
+
+                gIBS.Add(new XElement(ns + "vIBS", FormatarValor(tot.GrupoIBSTot.ValorIBS)));
+                totElement.Add(gIBS);
+            }
+
+            if (tot.GrupoCBSTot != null)
+            {
+                var gCBS = new XElement(ns + "gCBS");
+                gCBS.Add(new XElement(ns + "vDif", FormatarValor(tot.GrupoCBSTot.ValorDiferimento)));
+                gCBS.Add(new XElement(ns + "vDevTrib", FormatarValor(tot.GrupoCBSTot.ValorDevolucaoTributos)));
+                gCBS.Add(new XElement(ns + "vCBS", FormatarValor(tot.GrupoCBSTot.ValorCBS)));
+
+                if (tot.GrupoCBSTot.TotalCreditoPresumido.HasValue)
+                {
+                    gCBS.Add(new XElement(ns + "vCredPres", FormatarValor(tot.GrupoCBSTot.TotalCreditoPresumido.Value)));
+                }
+
+                if (tot.GrupoCBSTot.TotalCreditoPresumidoCondicaoSuspensiva.HasValue)
+                {
+                    gCBS.Add(new XElement(ns + "vCredPresCondSus", FormatarValor(tot.GrupoCBSTot.TotalCreditoPresumidoCondicaoSuspensiva.Value)));
+                }
+
+                totElement.Add(gCBS);
+            }
+
+            if (tot.GrupoMonofasiaTot != null)
+            {
+                var gMono = new XElement(ns + "gMono");
+                gMono.Add(new XElement(ns + "vIBSMono", FormatarValor(tot.GrupoMonofasiaTot.ValorIBSMonofasico)));
+                gMono.Add(new XElement(ns + "vCBSMono", FormatarValor(tot.GrupoMonofasiaTot.ValorCBSMonofasica)));
+                gMono.Add(new XElement(ns + "vIBSMonoReten", FormatarValor(tot.GrupoMonofasiaTot.ValorIBSMonofasicoRetencao)));
+                gMono.Add(new XElement(ns + "vCBSMonoReten", FormatarValor(tot.GrupoMonofasiaTot.ValorCBSMonofasicaRetencao)));
+                gMono.Add(new XElement(ns + "vIBSMonoRet", FormatarValor(tot.GrupoMonofasiaTot.ValorIBSMonofasicoRetido)));
+                gMono.Add(new XElement(ns + "vCBSMonoRet", FormatarValor(tot.GrupoMonofasiaTot.ValorCBSMonofasicaRetida)));
+                totElement.Add(gMono);
+            }
+
+            if (tot.GrupoEstornoCreditoTot != null)
+            {
+                var gEstornoCred = new XElement(ns + "gEstornoCred");
+                gEstornoCred.Add(new XElement(ns + "vIBSEstCred", FormatarValor(tot.GrupoEstornoCreditoTot.ValorIBSEstornado)));
+                gEstornoCred.Add(new XElement(ns + "vCBSEstCred", FormatarValor(tot.GrupoEstornoCreditoTot.ValorCBSEstornada)));
+                totElement.Add(gEstornoCred);
+            }
+
+            return totElement;
         }
 
         private string RemoverFormatacao(string? valor)

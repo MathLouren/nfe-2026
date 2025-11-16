@@ -23,6 +23,11 @@ namespace NFE.Models
         public TransporteViewModel? Transporte { get; set; }
         public CobrancaViewModel? Cobranca { get; set; }
         public string? InformacoesAdicionais { get; set; }
+
+        public IBSCBSTotViewModel? IBSCBSTot { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Valor total da NF com impostos por fora deve ser maior ou igual a zero")]
+        public decimal? ValorNFTot { get; set; }
     }
 
     public class IdentificacaoViewModel
@@ -84,6 +89,27 @@ namespace NFE.Models
         [Required(ErrorMessage = "Indicador de presença é obrigatório")]
         [RegularExpression("^(0|1|2|3|4|5|9)$", ErrorMessage = "Indicador de presença inválido")]
         public string IndicadorPresenca { get; set; } = "1";
+
+        [StringLength(7, MinimumLength = 7, ErrorMessage = "Código do município IBS deve ter 7 caracteres")]
+        public string? CodigoMunicipioFGIBS { get; set; }
+
+        public DateTime? DataPrevisaoEntrega { get; set; }
+
+        [RegularExpression("^(0|1)$", ErrorMessage = "Indicador de intermediador deve ser 0 ou 1")]
+        public string? IndicadorIntermediador { get; set; }
+
+        [RegularExpression("^(1|2|3|4|5|6)$", ErrorMessage = "Tipo de nota de débito inválido")]
+        public string? TipoNFDebito { get; set; }
+
+        [RegularExpression("^(1|2|3|4|5|6)$", ErrorMessage = "Tipo de nota de crédito inválido")]
+        public string? TipoNFCredito { get; set; }
+
+        [RegularExpression("^(0|1|2|3)$", ErrorMessage = "Processo de emissão deve ser 0, 1, 2 ou 3")]
+        public string ProcessoEmissao { get; set; } = "0";
+
+        [Required(ErrorMessage = "Identificador de local de destino é obrigatório")]
+        [RegularExpression("^(1|2|3)$", ErrorMessage = "Identificador de local de destino deve ser 1, 2 ou 3")]
+        public string IdentificadorLocalDestino { get; set; } = "1";
     }
 
     public class EmitenteViewModel
@@ -221,6 +247,471 @@ namespace NFE.Models
         [Required(ErrorMessage = "Indicador de total é obrigatório")]
         [RegularExpression("^(0|1)$", ErrorMessage = "Indicador deve ser 0 ou 1")]
         public string IndicadorTotal { get; set; } = "1";
+
+        public IBSCBSViewModel? IBSCBS { get; set; }
+
+        public ISViewModel? ImpostoSeletivo { get; set; }
+    }
+
+    public class IBSCBSViewModel
+    {
+        [Required(ErrorMessage = "CST do IBS/CBS é obrigatório")]
+        [RegularExpression("^[0-9]{3}$", ErrorMessage = "CST deve ter 3 dígitos")]
+        public string CST { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Código de classificação tributária é obrigatório")]
+        [RegularExpression("^[0-9]{6}$", ErrorMessage = "Código de classificação tributária deve ter 6 dígitos")]
+        public string CodigoClassificacaoTributaria { get; set; } = string.Empty;
+
+        [RegularExpression("^1$", ErrorMessage = "Indicador de doação deve ser 1")]
+        public string? IndicadorDoacao { get; set; }
+
+        public IBSCBSGrupoViewModel? GrupoIBSCBS { get; set; }
+
+        public IBSCBSMonofasiaViewModel? GrupoIBSCBSMonofasia { get; set; }
+
+        public TransferenciaCreditoViewModel? GrupoTransferenciaCredito { get; set; }
+
+        public AjusteCompetenciaViewModel? GrupoAjusteCompetencia { get; set; }
+
+        public EstornoCreditoViewModel? GrupoEstornoCredito { get; set; }
+
+        public CreditoPresumidoOperacaoViewModel? GrupoCreditoPresumidoOperacao { get; set; }
+
+        public CreditoPresumidoIBSZFMViewModel? GrupoCreditoPresumidoIBSZFM { get; set; }
+    }
+
+    public class IBSCBSGrupoViewModel
+    {
+        [Required(ErrorMessage = "Valor da base de cálculo é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor da base de cálculo deve ser maior ou igual a zero")]
+        public decimal ValorBaseCalculo { get; set; }
+
+        [Required(ErrorMessage = "Grupo IBS UF é obrigatório")]
+        public IBSGrupoUFViewModel GrupoIBSUF { get; set; } = new();
+
+        [Required(ErrorMessage = "Grupo IBS Município é obrigatório")]
+        public IBSGrupoMunicipioViewModel GrupoIBSMunicipio { get; set; } = new();
+
+        [Required(ErrorMessage = "Valor do IBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor do IBS deve ser maior ou igual a zero")]
+        public decimal ValorIBS { get; set; }
+
+        [Required(ErrorMessage = "Grupo CBS é obrigatório")]
+        public CBSGrupoViewModel GrupoCBS { get; set; } = new();
+    }
+
+    public class IBSGrupoUFViewModel
+    {
+        [Required(ErrorMessage = "Alíquota do IBS UF é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaIBSUF { get; set; }
+
+        public DiferimentoViewModel? GrupoDiferimento { get; set; }
+
+        public DevolucaoTributoViewModel? GrupoDevolucaoTributo { get; set; }
+
+        public ReducaoAliquotaViewModel? GrupoReducaoAliquota { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS UF é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor do IBS UF deve ser maior ou igual a zero")]
+        public decimal ValorIBSUF { get; set; }
+    }
+
+    public class IBSGrupoMunicipioViewModel
+    {
+        [Required(ErrorMessage = "Alíquota do IBS Município é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaIBSMunicipio { get; set; }
+
+        public DiferimentoViewModel? GrupoDiferimento { get; set; }
+
+        public DevolucaoTributoViewModel? GrupoDevolucaoTributo { get; set; }
+
+        public ReducaoAliquotaViewModel? GrupoReducaoAliquota { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS Município é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor do IBS Município deve ser maior ou igual a zero")]
+        public decimal ValorIBSMunicipio { get; set; }
+    }
+
+    public class CBSGrupoViewModel
+    {
+        [Required(ErrorMessage = "Alíquota da CBS é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaCBS { get; set; }
+
+        public DiferimentoViewModel? GrupoDiferimento { get; set; }
+
+        public DevolucaoTributoViewModel? GrupoDevolucaoTributo { get; set; }
+
+        public ReducaoAliquotaViewModel? GrupoReducaoAliquota { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor da CBS deve ser maior ou igual a zero")]
+        public decimal ValorCBS { get; set; }
+    }
+
+    public class DiferimentoViewModel
+    {
+        [Required(ErrorMessage = "Percentual de diferimento é obrigatório")]
+        [Range(0, 100, ErrorMessage = "Percentual deve estar entre 0 e 100")]
+        public decimal PercentualDiferimento { get; set; }
+
+        [Required(ErrorMessage = "Valor do diferimento é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor do diferimento deve ser maior ou igual a zero")]
+        public decimal ValorDiferimento { get; set; }
+    }
+
+    public class DevolucaoTributoViewModel
+    {
+        [Required(ErrorMessage = "Valor da devolução de tributo é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor da devolução deve ser maior ou igual a zero")]
+        public decimal ValorDevolucaoTributo { get; set; }
+    }
+
+    public class ReducaoAliquotaViewModel
+    {
+        [Required(ErrorMessage = "Percentual de redução de alíquota é obrigatório")]
+        [Range(0, 100, ErrorMessage = "Percentual deve estar entre 0 e 100")]
+        public decimal PercentualReducaoAliquota { get; set; }
+
+        [Required(ErrorMessage = "Alíquota efetiva é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota efetiva deve estar entre 0 e 100")]
+        public decimal AliquotaEfetiva { get; set; }
+    }
+
+    public class IBSCBSMonofasiaViewModel
+    {
+        public MonofasiaPadraoViewModel? GrupoMonofasiaPadrao { get; set; }
+
+        public MonofasiaRetencaoViewModel? GrupoMonofasiaRetencao { get; set; }
+
+        public MonofasiaRetidoAnteriormenteViewModel? GrupoMonofasiaRetidoAnteriormente { get; set; }
+
+        public MonofasiaDiferimentoViewModel? GrupoMonofasiaDiferimento { get; set; }
+
+        [Required(ErrorMessage = "Total de IBS monofásico do item é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Total deve ser maior ou igual a zero")]
+        public decimal TotalIBSMonofasicoItem { get; set; }
+
+        [Required(ErrorMessage = "Total de CBS monofásica do item é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Total deve ser maior ou igual a zero")]
+        public decimal TotalCBSMonofasicaItem { get; set; }
+    }
+
+    public class MonofasiaPadraoViewModel
+    {
+        [Required(ErrorMessage = "Quantidade tributada na monofasia é obrigatória")]
+        [Range(0, double.MaxValue, ErrorMessage = "Quantidade deve ser maior ou igual a zero")]
+        public decimal QuantidadeTributada { get; set; }
+
+        [Required(ErrorMessage = "Alíquota ad rem do IBS é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaAdRemIBS { get; set; }
+
+        [Required(ErrorMessage = "Alíquota ad rem da CBS é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaAdRemCBS { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS monofásico é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMonofasico { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS monofásica é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSMonofasica { get; set; }
+    }
+
+    public class MonofasiaRetencaoViewModel
+    {
+        [Required(ErrorMessage = "Quantidade tributada sujeita a retenção é obrigatória")]
+        [Range(0, double.MaxValue, ErrorMessage = "Quantidade deve ser maior ou igual a zero")]
+        public decimal QuantidadeTributadaRetencao { get; set; }
+
+        [Required(ErrorMessage = "Alíquota ad rem do IBS sujeito a retenção é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaAdRemIBSRetencao { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS monofásico sujeito a retenção é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMonofasicoRetencao { get; set; }
+
+        [Required(ErrorMessage = "Alíquota ad rem da CBS sujeita a retenção é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaAdRemCBSRetencao { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS monofásica sujeita a retenção é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSMonofasicaRetencao { get; set; }
+    }
+
+    public class MonofasiaRetidoAnteriormenteViewModel
+    {
+        [Required(ErrorMessage = "Quantidade tributada retida anteriormente é obrigatória")]
+        [Range(0, double.MaxValue, ErrorMessage = "Quantidade deve ser maior ou igual a zero")]
+        public decimal QuantidadeTributadaRetida { get; set; }
+
+        [Required(ErrorMessage = "Alíquota ad rem do IBS retido anteriormente é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaAdRemIBSRetido { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS retido anteriormente é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSRetidoAnteriormente { get; set; }
+
+        [Required(ErrorMessage = "Alíquota ad rem da CBS retida anteriormente é obrigatória")]
+        [Range(0, 100, ErrorMessage = "Alíquota deve estar entre 0 e 100")]
+        public decimal AliquotaAdRemCBSRetida { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS retida anteriormente é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSRetidaAnteriormente { get; set; }
+    }
+
+    public class MonofasiaDiferimentoViewModel
+    {
+        [Required(ErrorMessage = "Percentual do diferimento do imposto monofásico é obrigatório")]
+        [Range(0, 100, ErrorMessage = "Percentual deve estar entre 0 e 100")]
+        public decimal PercentualDiferimentoIBS { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS monofásico diferido é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMonofasicoDiferido { get; set; }
+
+        [Required(ErrorMessage = "Percentual do diferimento da CBS monofásica é obrigatório")]
+        [Range(0, 100, ErrorMessage = "Percentual deve estar entre 0 e 100")]
+        public decimal PercentualDiferimentoCBS { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS monofásica diferida é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSMonofasicaDiferida { get; set; }
+    }
+
+    public class TransferenciaCreditoViewModel
+    {
+        [Required(ErrorMessage = "Valor do IBS a ser transferido é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSTransferir { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS a ser transferida é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSTransferir { get; set; }
+    }
+
+    public class AjusteCompetenciaViewModel
+    {
+        [Required(ErrorMessage = "Competência de apuração é obrigatória (AAAA-MM)")]
+        [RegularExpression("^20[0-9]{2}-(0[1-9]|1[0-2])$", ErrorMessage = "Competência deve estar no formato AAAA-MM")]
+        public string CompetenciaApuracao { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Valor do IBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBS { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBS { get; set; }
+    }
+
+    public class EstornoCreditoViewModel
+    {
+        [Required(ErrorMessage = "Valor do IBS a ser estornado é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSEstornar { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS a ser estornada é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSEstornar { get; set; }
+    }
+
+    public class CreditoPresumidoOperacaoViewModel
+    {
+        [Required(ErrorMessage = "Valor da base de cálculo do crédito presumido é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorBaseCalculoCreditoPresumido { get; set; }
+
+        [Required(ErrorMessage = "Código de classificação do crédito presumido é obrigatório")]
+        [RegularExpression("^[0-9]{2}$", ErrorMessage = "Código deve ter 2 dígitos")]
+        public string CodigoCreditoPresumido { get; set; } = string.Empty;
+
+        public CreditoPresumidoViewModel? GrupoIBSCreditoPresumido { get; set; }
+
+        public CreditoPresumidoViewModel? GrupoCBSCreditoPresumido { get; set; }
+    }
+
+    public class CreditoPresumidoViewModel
+    {
+        [Required(ErrorMessage = "Percentual do crédito presumido é obrigatório")]
+        [Range(0, 100, ErrorMessage = "Percentual deve estar entre 0 e 100")]
+        public decimal PercentualCreditoPresumido { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal? ValorCreditoPresumido { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal? ValorCreditoPresumidoCondicaoSuspensiva { get; set; }
+    }
+
+    public class CreditoPresumidoIBSZFMViewModel
+    {
+        [Required(ErrorMessage = "Competência de apuração é obrigatória (AAAA-MM)")]
+        [RegularExpression("^20[0-9]{2}-(0[1-9]|1[0-2])$", ErrorMessage = "Competência deve estar no formato AAAA-MM")]
+        public string CompetenciaApuracao { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Tipo de crédito presumido IBS ZFM é obrigatório")]
+        [RegularExpression("^(0|1|2|3|4)$", ErrorMessage = "Tipo deve ser 0, 1, 2, 3 ou 4")]
+        public string TipoCreditoPresumidoIBSZFM { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Valor do crédito presumido IBS ZFM é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCreditoPresumidoIBSZFM { get; set; }
+    }
+
+    public class ISViewModel
+    {
+        [Required(ErrorMessage = "CST do Imposto Seletivo é obrigatório")]
+        [RegularExpression("^[0-9]{3}$", ErrorMessage = "CST deve ter 3 dígitos")]
+        public string CSTIS { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Código de classificação tributária do IS é obrigatório")]
+        [RegularExpression("^[0-9]{6}$", ErrorMessage = "Código deve ter 6 dígitos")]
+        public string CodigoClassificacaoTributariaIS { get; set; } = string.Empty;
+
+        [Range(0, double.MaxValue, ErrorMessage = "Valor da base de cálculo deve ser maior ou igual a zero")]
+        public decimal? ValorBaseCalculoIS { get; set; }
+
+        [Range(0, 100, ErrorMessage = "Alíquota do Imposto Seletivo (percentual) deve estar entre 0 e 100")]
+        public decimal? AliquotaIS { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Alíquota do Imposto Seletivo (por valor) deve ser maior ou igual a zero")]
+        public decimal? AliquotaISEspecifica { get; set; }
+
+        [StringLength(6, ErrorMessage = "Unidade de medida deve ter no máximo 6 caracteres")]
+        public string? UnidadeTributaria { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Quantidade deve ser maior ou igual a zero")]
+        public decimal? QuantidadeTributaria { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Valor do Imposto Seletivo deve ser maior ou igual a zero")]
+        public decimal? ValorIS { get; set; }
+    }
+
+    public class IBSCBSTotViewModel
+    {
+        [Required(ErrorMessage = "Valor total da base de cálculo IBS/CBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorBaseCalculoIBSCBS { get; set; }
+
+        public IBSTotViewModel? GrupoIBSTot { get; set; }
+
+        public CBSTotViewModel? GrupoCBSTot { get; set; }
+
+        public EstornoCreditoTotViewModel? GrupoEstornoCreditoTot { get; set; }
+
+        public MonofasiaTotViewModel? GrupoMonofasiaTot { get; set; }
+    }
+
+    public class IBSTotViewModel
+    {
+        [Required(ErrorMessage = "Grupo IBS UF é obrigatório")]
+        public IBSTotUFViewModel GrupoIBSUF { get; set; } = new();
+
+        [Required(ErrorMessage = "Grupo IBS Município é obrigatório")]
+        public IBSTotMunicipioViewModel GrupoIBSMunicipio { get; set; } = new();
+
+        [Required(ErrorMessage = "Valor total do IBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBS { get; set; }
+    }
+
+    public class IBSTotUFViewModel
+    {
+        [Required(ErrorMessage = "Total do diferimento é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorDiferimento { get; set; }
+
+        [Required(ErrorMessage = "Total de devoluções de tributos é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorDevolucaoTributos { get; set; }
+
+        [Required(ErrorMessage = "Valor total do IBS Estadual é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSUF { get; set; }
+    }
+
+    public class IBSTotMunicipioViewModel
+    {
+        [Required(ErrorMessage = "Total do diferimento é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorDiferimento { get; set; }
+
+        [Required(ErrorMessage = "Total de devoluções de tributos é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorDevolucaoTributos { get; set; }
+
+        [Required(ErrorMessage = "Valor total do IBS Municipal é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMunicipio { get; set; }
+    }
+
+    public class CBSTotViewModel
+    {
+        [Required(ErrorMessage = "Total do diferimento é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorDiferimento { get; set; }
+
+        [Required(ErrorMessage = "Total de devoluções de tributos é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorDevolucaoTributos { get; set; }
+
+        [Required(ErrorMessage = "Valor total da CBS é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBS { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Total do crédito presumido deve ser maior ou igual a zero")]
+        public decimal? TotalCreditoPresumido { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Total do crédito presumido condição suspensiva deve ser maior ou igual a zero")]
+        public decimal? TotalCreditoPresumidoCondicaoSuspensiva { get; set; }
+    }
+
+    public class EstornoCreditoTotViewModel
+    {
+        [Required(ErrorMessage = "Valor total do IBS estornado é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSEstornado { get; set; }
+
+        [Required(ErrorMessage = "Valor total da CBS estornada é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSEstornada { get; set; }
+    }
+
+    public class MonofasiaTotViewModel
+    {
+        [Required(ErrorMessage = "Valor total do IBS monofásico é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMonofasico { get; set; }
+
+        [Required(ErrorMessage = "Valor total da CBS monofásica é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSMonofasica { get; set; }
+
+        [Required(ErrorMessage = "Valor total do IBS monofásico sujeito a retenção é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMonofasicoRetencao { get; set; }
+
+        [Required(ErrorMessage = "Valor total da CBS monofásica sujeita a retenção é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSMonofasicaRetencao { get; set; }
+
+        [Required(ErrorMessage = "Valor do IBS monofásico retido anteriormente é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorIBSMonofasicoRetido { get; set; }
+
+        [Required(ErrorMessage = "Valor da CBS monofásica retida anteriormente é obrigatório")]
+        [Range(0, double.MaxValue, ErrorMessage = "Valor deve ser maior ou igual a zero")]
+        public decimal ValorCBSMonofasicaRetida { get; set; }
     }
 
     public class TransporteViewModel
