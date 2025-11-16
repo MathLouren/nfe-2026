@@ -122,8 +122,10 @@ namespace NFE.Services
                     };
                 }
 
-                // Enviar para webservice
+                // Enviar para webservice (método legado - será substituído)
+                #pragma warning disable CS0618
                 var resposta = await _webServiceClient.EnviarNFeAsync(xml, ambiente);
+                #pragma warning restore CS0618
 
                 return new NFeResponseViewModel
                 {
@@ -133,7 +135,7 @@ namespace NFE.Services
                     XmlRetorno = resposta.XmlRetorno,
                     Protocolo = resposta.Protocolo,
                     ChaveAcesso = resposta.ChaveAcesso,
-                    CodigoStatus = resposta.CodigoStatus,
+                    CodigoStatus = resposta.CodigoStatus?.ToString(),
                     Motivo = resposta.Motivo,
                     Erros = resposta.Erros?.ToDictionary(
                         kvp => kvp.Key,

@@ -886,5 +886,21 @@ namespace NFE.Models
         [Range(0.01, double.MaxValue, ErrorMessage = "Valor deve ser maior que zero")]
         public decimal Valor { get; set; }
     }
+    
+    public class NFeRequestViewModel
+    {
+        [Required(ErrorMessage = "Dados da NFe são obrigatórios")]
+        public NFeViewModel DadosNFe { get; set; } = new(); // ✅ Inicializar
+
+        [Required(ErrorMessage = "Certificado digital é obrigatório")]
+        public string CertificadoBase64 { get; set; } = string.Empty; // ✅ Inicializar
+
+        [Required(ErrorMessage = "Senha do certificado é obrigatória")]
+        public string SenhaCertificado { get; set; } = string.Empty; // ✅ Inicializar
+
+        public string Ambiente { get; set; } = "homologacao";
+    }
+
+
 }
 

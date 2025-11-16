@@ -34,6 +34,8 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient<WebServiceClient>();
 builder.Services.AddScoped<IWebServiceClient, WebServiceClient>();
 builder.Services.AddScoped<INFeService, NFeService>();
+builder.Services.AddScoped<AssinaturaDigital>();
+
 
 var app = builder.Build();
 

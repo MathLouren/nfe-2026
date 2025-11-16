@@ -1,154 +1,197 @@
 using Microsoft.AspNetCore.Mvc;
-using System.ComponentModel.DataAnnotations;
 using NFE.Models;
 using NFE.Services;
+using System.Security.Cryptography.X509Certificates;
 
 namespace NFE.Controllers
 {
-    /// <summary>
-    /// Controller para gerenciamento de NFe seguindo padrão MVC
-    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class NFeController : ControllerBase
     {
         private readonly INFeService _nfeService;
+        private readonly IWebServiceClient _webServiceClient;
+        private readonly AssinaturaDigital _assinaturaDigital;
         private readonly ILogger<NFeController> _logger;
 
-        public NFeController(INFeService nfeService, ILogger<NFeController> logger)
+        public NFeController(
+            INFeService nfeService,
+            IWebServiceClient webServiceClient,
+            AssinaturaDigital assinaturaDigital,
+            ILogger<NFeController> logger)
         {
             _nfeService = nfeService;
+            _webServiceClient = webServiceClient;
+            _assinaturaDigital = assinaturaDigital;
             _logger = logger;
         }
 
         /// <summary>
-        /// Recebe dados de NFe e processa (gera XML e envia para webservice)
+        /// Endpoint LEGADO - SEM certificado (modo simulação)
         /// </summary>
-        /// <param name="model">Dados da NFe</param>
-        /// <param name="ambiente">Ambiente: homologacao ou producao</param>
-        /// <returns>Resposta com resultado do processamento</returns>
         [HttpPost]
-        [ProducesResponseType(typeof(NFeResponseViewModel), 200)]
-        [ProducesResponseType(typeof(ValidationProblemDetails), 400)]
-        [ProducesResponseType(typeof(ProblemDetails), 500)]
-        public async Task<IActionResult> Criar([FromBody] NFeViewModel model, [FromQuery] string ambiente = "homologacao")
+        public async Task<IActionResult> CriarNFe(
+            [FromBody] NFeViewModel model,
+            [FromQuery] string ambiente = "homologacao")
         {
             try
             {
-                _logger.LogInformation("Recebendo solicitação de criação de NFe - Ambiente: {Ambiente}", ambiente);
+                _logger.LogInformation("Recebendo solicitação de criação de NFe (LEGADO) - Ambiente: {Ambiente}", ambiente);
 
-                // Validação do modelo
                 if (!ModelState.IsValid)
                 {
-                    _logger.LogWarning("Modelo inválido: {Errors}", 
-                        string.Join(", ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)));
-
-                    var errors = ModelState
-                        .Where(x => x.Value?.Errors.Count > 0)
-                        .ToDictionary(
-                            kvp => kvp.Key,
-                            kvp => kvp.Value?.Errors.Select(e => e.ErrorMessage).ToArray() ?? Array.Empty<string>()
-                        );
-
-                    return BadRequest(new NFeResponseViewModel
+                    return BadRequest(new
                     {
-                        Sucesso = false,
-                        Mensagem = "Dados inválidos",
-                        Erros = errors
+                        sucesso = false,
+                        mensagem = "Dados inválidos",
+                        erros = ModelState
                     });
                 }
 
-                // Processar NFe
                 var resultado = await _nfeService.ProcessarNFeAsync(model, ambiente);
 
                 _logger.LogInformation("NFe processada - Sucesso: {Sucesso}, Status: {Status}", 
                     resultado.Sucesso, resultado.CodigoStatus);
 
-                return Ok(resultado);
+                if (resultado.Sucesso)
+                {
+                    return Ok(resultado);
+                }
+                else
+                {
+                    return BadRequest(resultado);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao processar NFe (endpoint legado)");
+                return StatusCode(500, new
+                {
+                    sucesso = false,
+                    mensagem = "Erro ao processar NFe",
+                    erro = ex.Message
+                });
+            }
+        }
+
+        /// <summary>
+        /// Endpoint NOVO - COM certificado digital (recomendado)
+        /// </summary>
+        [HttpPost("emitir")]
+        public async Task<IActionResult> EmitirNFe([FromBody] NFeRequestViewModel request)
+        {
+            try
+            {
+                _logger.LogInformation("Recebendo solicitação de emissão de NFe COM certificado - Ambiente: {Ambiente}", 
+                    request.Ambiente);
+
+                // 1. Validar modelo
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(new
+                    {
+                        sucesso = false,
+                        mensagem = "Dados inválidos",
+                        erros = ModelState
+                    });
+                }
+
+                // 2. Carregar certificado
+                X509Certificate2 certificado;
+                try
+                {
+                    certificado = _assinaturaDigital.CarregarCertificadoBase64(
+                        request.CertificadoBase64,
+                        request.SenhaCertificado
+                    );
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao carregar certificado");
+                    return BadRequest(new
+                    {
+                        sucesso = false,
+                        mensagem = "Erro ao carregar certificado digital",
+                        erro = ex.Message
+                    });
+                }
+
+                // 3. Gerar XML da NFe
+                string xml = await _nfeService.GerarXmlAsync(request.DadosNFe);
+                _logger.LogInformation("XML gerado - Tamanho: {Tamanho} bytes", xml.Length);
+
+                // 4. Assinar XML
+                string xmlAssinado;
+                try
+                {
+                    xmlAssinado = _assinaturaDigital.AssinarXml(xml, certificado);
+                    _logger.LogInformation("XML assinado com sucesso");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao assinar XML");
+                    return BadRequest(new
+                    {
+                        sucesso = false,
+                        mensagem = "Erro ao assinar XML",
+                        erro = ex.Message,
+                        xmlNaoAssinado = xml
+                    });
+                }
+
+                // 5. Criar envelope SOAP
+                string soapEnvelope = Utils.SoapEnvelopeBuilder.CriarEnvelopeAutorizacao(
+                    xmlAssinado,
+                    request.DadosNFe.Identificacao.CodigoUF,
+                    "4.00"
+                );
+
+                // 6. Enviar para SEFAZ
+                var resultado = await _webServiceClient.EnviarNFeComCertificado(
+                    soapEnvelope,
+                    request.Ambiente,
+                    certificado
+                );
+
+                _logger.LogInformation("NFe processada - Sucesso: {Sucesso}", resultado.Sucesso);
+
+                if (resultado.Sucesso)
+                {
+                    return Ok(resultado);
+                }
+                else
+                {
+                    return BadRequest(resultado);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Erro ao processar NFe");
-                return Problem(
-                    title: "Erro interno do servidor",
-                    detail: $"Ocorreu um erro ao processar a solicitação: {ex.Message}",
-                    statusCode: 500
-                );
-            }
-        }
-
-        /// <summary>
-        /// Apenas gera XML da NFe sem enviar para webservice
-        /// </summary>
-        /// <param name="model">Dados da NFe</param>
-        /// <returns>XML gerado</returns>
-        [HttpPost("gerar-xml")]
-        [ProducesResponseType(typeof(string), 200)]
-        [ProducesResponseType(typeof(ValidationProblemDetails), 400)]
-        public async Task<IActionResult> GerarXml([FromBody] NFeViewModel model)
-        {
-            try
-            {
-                _logger.LogInformation("Gerando XML de NFe");
-
-                if (!ModelState.IsValid)
+                return StatusCode(500, new
                 {
-                    return ValidationProblem(ModelState);
-                }
-
-                var xml = await _nfeService.GerarXmlAsync(model);
-                return Content(xml, "application/xml", System.Text.Encoding.UTF8);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Erro ao gerar XML de NFe");
-                return Problem("Erro ao gerar XML", statusCode: 500);
+                    sucesso = false,
+                    mensagem = "Erro ao processar NFe",
+                    erro = ex.Message,
+                    stackTrace = ex.StackTrace
+                });
             }
         }
 
         /// <summary>
-        /// Valida XML de NFe
+        /// Consulta status do serviço da SEFAZ
         /// </summary>
-        /// <param name="xml">XML para validação</param>
-        /// <returns>Resultado da validação</returns>
-        [HttpPost("validar-xml")]
-        [ProducesResponseType(typeof(object), 200)]
-        public async Task<IActionResult> ValidarXml([FromBody] string xml)
-        {
-            try
-            {
-                _logger.LogInformation("Validando XML de NFe");
-
-                if (string.IsNullOrWhiteSpace(xml))
-                {
-                    return BadRequest(new { valid = false, message = "XML não pode estar vazio" });
-                }
-
-                var isValid = await _nfeService.ValidarXmlAsync(xml);
-                return Ok(new { valid = isValid, message = isValid ? "XML válido" : "XML inválido" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Erro ao validar XML de NFe");
-                return Problem("Erro ao validar XML", statusCode: 500);
-            }
-        }
-
-        /// <summary>
-        /// Retorna informações sobre a API
-        /// </summary>
-        [HttpGet("info")]
-        [ProducesResponseType(typeof(object), 200)]
-        public IActionResult Info()
+        [HttpGet("status")]
+        public IActionResult ConsultarStatus([FromQuery] string uf = "SP", [FromQuery] string ambiente = "homologacao")
         {
             return Ok(new
             {
-                api = "API NFe - Padrão MVC",
+                sucesso = true,
+                mensagem = "API NFe está funcionando",
+                uf = uf,
+                ambiente = ambiente,
                 versao = "1.0.0",
-                padrao = "SEFAZ NFe 4.00",
-                descricao = "API para recebimento e processamento de NFe seguindo padrão MVC"
+                dataHora = DateTime.Now
             });
         }
     }
 }
-
