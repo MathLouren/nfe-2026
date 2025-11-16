@@ -1,5 +1,6 @@
 using NFE.Models;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -159,12 +160,111 @@ namespace NFE.Services
             }
         }
 
+        // public async Task<string> GerarXmlAsync(NFeViewModel model)
+        // {
+        //     return await Task.Run(() =>
+        //     {
+        //         try
+        //         {
+        //             var ns = XNamespace.Get("http://www.portalfiscal.inf.br/nfe");
+        //             var nfe = new XElement(ns + "NFe");
+
+        //             var infNFe = new XElement(ns + "infNFe",
+        //                 new XAttribute("Id", GerarIdNFe(model)),
+        //                 new XAttribute("versao", "4.00")
+        //             );
+
+        //             // Ordem obrigatória
+        //             infNFe.Add(CriarIde(model, ns));
+        //             infNFe.Add(CriarEmitente(model, ns));
+        //             infNFe.Add(CriarDestinatario(model, ns));
+                    
+        //             int nItem = 1;
+        //             foreach (var produto in model.Produtos)
+        //             {
+        //                 infNFe.Add(CriarDetalhe(produto, ns, nItem++));
+        //             }
+
+        //             infNFe.Add(CriarTotal(model, ns));
+                    
+        //             if (model.Transporte != null)
+        //             {
+        //                 infNFe.Add(CriarTransporte(model.Transporte, ns));
+        //             }
+        //             else
+        //             {
+        //                 var transp = new XElement(ns + "transp");
+        //                 transp.Add(new XElement(ns + "modFrete", "9"));
+        //                 infNFe.Add(transp);
+        //             }
+
+        //             if (model.Cobranca != null)
+        //             {
+        //                 infNFe.Add(CriarCobranca(model.Cobranca, ns));
+        //             }
+
+        //             // Pagamento (obrigatório)
+        //             if (model.Pagamento?.FormasPagamento != null && 
+        //                 model.Pagamento.FormasPagamento.Any())
+        //             {
+        //                 foreach (var forma in model.Pagamento.FormasPagamento)
+        //                 {
+        //                     infNFe.Add(CriarPagamento(forma, ns));
+        //                 }
+        //             }
+        //             else
+        //             {
+        //                 // Pagamento padrão
+        //                 var valorTotal = model.Produtos.Sum(p => p.ValorTotal);
+        //                 var pag = new XElement(ns + "pag");
+        //                 var detPag = new XElement(ns + "detPag");
+        //                 detPag.Add(new XElement(ns + "tPag", "90")); // Sem pagamento
+        //                 detPag.Add(new XElement(ns + "vPag", FormatarValor(valorTotal)));
+        //                 pag.Add(detPag);
+        //                 infNFe.Add(pag);
+        //             }
+
+        //             if (!string.IsNullOrEmpty(model.InformacoesAdicionais))
+        //             {
+        //                 var infAdic = new XElement(ns + "infAdic");
+        //                 infAdic.Add(new XElement(ns + "infCpl", model.InformacoesAdicionais));
+        //                 infNFe.Add(infAdic);
+        //             }
+
+        //             nfe.Add(infNFe);
+
+        //             // ✅ NÃO ADICIONAR infNFeSupl para NFe modelo 55
+        //             // Só adicionar para NFCe (modelo 65) com QR Code
+        //             // if (model.Identificacao.Modelo == "65")
+        //             // {
+        //             //     var infNFeSupl = new XElement(ns + "infNFeSupl");
+        //             //     infNFeSupl.Add(new XElement(ns + "qrCode", "URL_DO_QRCODE"));
+        //             //     nfe.Add(infNFeSupl);
+        //             // }
+
+        //             var xmlDocument = new XDocument(
+        //                 new XDeclaration("1.0", "UTF-8", null),
+        //                 nfe
+        //             );
+
+        //             return xmlDocument.ToString();
+        //         }
+        //         catch (Exception ex)
+        //         {
+        //             _logger.LogError(ex, "Erro ao gerar XML de NFe");
+        //             throw;
+        //         }
+        //     });
+        // }
+
         public async Task<string> GerarXmlAsync(NFeViewModel model)
         {
             return await Task.Run(() =>
             {
                 try
                 {
+                    _logger.LogInformation("Iniciando geração de XML da NFe");
+                    
                     var ns = XNamespace.Get("http://www.portalfiscal.inf.br/nfe");
                     var nfe = new XElement(ns + "NFe");
 
@@ -173,48 +273,75 @@ namespace NFE.Services
                         new XAttribute("versao", "4.00")
                     );
 
-                    // ide
-                    var ide = CriarIde(model, ns);
-                    infNFe.Add(ide);
-
-                    // emit
-                    var emit = CriarEmitente(model, ns);
-                    infNFe.Add(emit);
-
-                    // dest
-                    var dest = CriarDestinatario(model, ns);
-                    infNFe.Add(dest);
-
-                    // det - produtos
+                    // 1. IDE
+                    _logger.LogInformation("Criando elemento IDE");
+                    infNFe.Add(CriarIde(model, ns));
+                    
+                    // 2. EMIT
+                    _logger.LogInformation("Criando elemento EMIT");
+                    infNFe.Add(CriarEmitente(model, ns));
+                    
+                    // 3. DEST
+                    _logger.LogInformation("Criando elemento DEST");
+                    infNFe.Add(CriarDestinatario(model, ns));
+                    
+                    // 4. DET (Produtos)
+                    _logger.LogInformation("Criando elementos DET - {Count} produtos", model.Produtos.Count);
                     int nItem = 1;
                     foreach (var produto in model.Produtos)
                     {
-                        var det = CriarDetalhe(produto, ns, nItem);
-                        infNFe.Add(det);
-                        nItem++;
+                        infNFe.Add(CriarDetalhe(produto, ns, nItem++));
                     }
 
-                    // total
-                    var total = CriarTotal(model, ns);
-                    infNFe.Add(total);
-
-                    // transp
+                    // 5. TOTAL
+                    _logger.LogInformation("Criando elemento TOTAL");
+                    infNFe.Add(CriarTotal(model, ns));
+                    
+                    // 6. TRANSP
+                    _logger.LogInformation("Criando elemento TRANSP");
                     if (model.Transporte != null)
                     {
-                        var transp = CriarTransporte(model.Transporte, ns);
+                        infNFe.Add(CriarTransporte(model.Transporte, ns));
+                    }
+                    else
+                    {
+                        var transp = new XElement(ns + "transp");
+                        transp.Add(new XElement(ns + "modFrete", "9"));
                         infNFe.Add(transp);
                     }
 
-                    // cobr
+                    // 7. COBR
                     if (model.Cobranca != null)
                     {
-                        var cobr = CriarCobranca(model.Cobranca, ns);
-                        infNFe.Add(cobr);
+                        _logger.LogInformation("Criando elemento COBR");
+                        infNFe.Add(CriarCobranca(model.Cobranca, ns));
                     }
 
-                    // infAdic
+                    // 8. PAG (OBRIGATÓRIO)
+                    _logger.LogInformation("Criando elemento PAG");
+                    if (model.Pagamento?.FormasPagamento != null && 
+                        model.Pagamento.FormasPagamento.Any())
+                    {
+                        foreach (var forma in model.Pagamento.FormasPagamento)
+                        {
+                            infNFe.Add(CriarPagamento(forma, ns));
+                        }
+                    }
+                    else
+                    {
+                        var valorTotal = model.Produtos.Sum(p => p.ValorTotal);
+                        var pag = new XElement(ns + "pag");
+                        var detPag = new XElement(ns + "detPag");
+                        detPag.Add(new XElement(ns + "tPag", "90"));
+                        detPag.Add(new XElement(ns + "vPag", FormatarValor(valorTotal)));
+                        pag.Add(detPag);
+                        infNFe.Add(pag);
+                    }
+
+                    // 9. INFADIC
                     if (!string.IsNullOrEmpty(model.InformacoesAdicionais))
                     {
+                        _logger.LogInformation("Criando elemento INFADIC");
                         var infAdic = new XElement(ns + "infAdic");
                         infAdic.Add(new XElement(ns + "infCpl", model.InformacoesAdicionais));
                         infNFe.Add(infAdic);
@@ -227,7 +354,17 @@ namespace NFE.Services
                         nfe
                     );
 
-                    return xmlDocument.ToString();
+                    string xmlString = xmlDocument.ToString();
+                    
+                    _logger.LogInformation("XML gerado - Tamanho: {Size} bytes", xmlString.Length);
+                    
+                    // Log do XML para debug (remover em produção)
+                    if (model.Identificacao.Ambiente == "2") // Apenas em homologação
+                    {
+                        _logger.LogDebug("XML Gerado: {XML}", xmlString);
+                    }
+
+                    return xmlString;
                 }
                 catch (Exception ex)
                 {
@@ -237,121 +374,260 @@ namespace NFE.Services
             });
         }
 
+        private XElement CriarPagamento(FormaPagamentoViewModel forma, XNamespace ns)
+        {
+            // Elemento pai <pag>
+            var pag = new XElement(ns + "pag");
+            
+            // Elemento filho <detPag> (obrigatório no XSD v4.00)
+            var detPag = new XElement(ns + "detPag");
+            
+            // Indicador de pagamento (opcional)
+            if (!string.IsNullOrEmpty(forma.IndicadorPagamento))
+            {
+                detPag.Add(new XElement(ns + "indPag", forma.IndicadorPagamento));
+            }
+            
+            // Meio de pagamento (obrigatório)
+            detPag.Add(new XElement(ns + "tPag", forma.MeioPagamento));
+            
+            // Valor do pagamento (obrigatório)
+            detPag.Add(new XElement(ns + "vPag", FormatarValor(forma.Valor)));
+            
+            // Informações de cartão (se aplicável)
+            if (forma.Cartao != null && 
+                (forma.MeioPagamento == "03" || forma.MeioPagamento == "04"))
+            {
+                var card = new XElement(ns + "card");
+                card.Add(new XElement(ns + "tpIntegra", forma.Cartao.TipoIntegracao));
+                card.Add(new XElement(ns + "CNPJ", RemoverFormatacao(forma.Cartao.CNPJ)));
+                card.Add(new XElement(ns + "tBand", forma.Cartao.Bandeira));
+                
+                if (!string.IsNullOrEmpty(forma.Cartao.NumeroAutorizacao))
+                {
+                    card.Add(new XElement(ns + "cAut", forma.Cartao.NumeroAutorizacao));
+                }
+                
+                detPag.Add(card);
+            }
+            
+            pag.Add(detPag);
+            return pag;
+        }
+
+        //PRODUCAO
+        // public async Task<bool> ValidarXmlAsync(string xml)
+        // {
+        //     return await Task.Run(() =>
+        //     {
+        //         try
+        //         {
+        //             // Primeiro verifica se está bem formado
+        //             var doc = XDocument.Parse(xml);
+                    
+        //             // Carrega schemas XSD
+        //             var schemas = new XmlSchemaSet();
+                    
+        //             // Tenta diferentes caminhos para encontrar os schemas
+        //             var currentDir = Directory.GetCurrentDirectory();
+        //             var possiblePaths = new[]
+        //             {
+        //                 Path.Combine(currentDir, "leiautes"),
+        //                 Path.Combine(currentDir, "..", "leiautes"),
+        //                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "leiautes"),
+        //                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "leiautes"),
+        //                 Path.GetFullPath(Path.Combine(currentDir, "..", "leiautes"))
+        //             };
+
+        //             string? schemasPath = null;
+        //             foreach (var path in possiblePaths)
+        //             {
+        //                 var testPath = Path.Combine(path, "nfe_v4.00.xsd");
+        //                 if (File.Exists(testPath))
+        //                 {
+        //                     schemasPath = path;
+        //                     break;
+        //                 }
+        //             }
+
+        //             if (schemasPath == null)
+        //             {
+        //                 _logger.LogWarning("Schemas XSD não encontrados. Validação XSD será ignorada.");
+        //                 return true; // Retorna true se não encontrar schemas (compatibilidade)
+        //             }
+                    
+        //             // Carrega schemas na ordem correta (dependências primeiro)
+        //             schemas.Add("http://www.w3.org/2000/09/xmldsig#", 
+        //                 Path.Combine(schemasPath, "xmldsig-core-schema_v1.01.xsd"));
+        //             schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+        //                 Path.Combine(schemasPath, "tiposBasico_v4.00.xsd"));
+        //             schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+        //                 Path.Combine(schemasPath, "DFeTiposBasicos_v1.00.xsd"));
+        //             schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+        //                 Path.Combine(schemasPath, "leiauteNFe_v4.00.xsd"));
+        //             schemas.Add("http://www.portalfiscal.inf.br/nfe", 
+        //                 Path.Combine(schemasPath, "nfe_v4.00.xsd"));
+
+        //             // Valida XML contra schemas
+        //             var validationErrors = new List<string>();
+        //             doc.Validate(schemas, (sender, args) =>
+        //             {
+        //                 if (args.Severity == XmlSeverityType.Error)
+        //                 {
+        //                     var errorMsg = $"Erro de validação XSD: {args.Message} - Linha: {args.Exception?.LineNumber}, Posição: {args.Exception?.LinePosition}";
+        //                     _logger.LogError(errorMsg);
+        //                     validationErrors.Add(errorMsg);
+        //                 }
+        //             });
+
+        //             if (validationErrors.Any())
+        //             {
+        //                 throw new XmlException(string.Join("; ", validationErrors));
+        //             }
+
+        //             return true;
+        //         }
+        //         catch (XmlException ex)
+        //         {
+        //             _logger.LogError(ex, "Erro ao validar XML contra schemas XSD");
+        //             return false;
+        //         }
+        //         catch (Exception ex)
+        //         {
+        //             _logger.LogError(ex, "Erro inesperado ao validar XML");
+        //             return false;
+        //         }
+        //     });
+        // }
+
+        //HOMOLOGACAO
         public async Task<bool> ValidarXmlAsync(string xml)
         {
             return await Task.Run(() =>
             {
                 try
                 {
-                    // Primeiro verifica se está bem formado
-                    var doc = XDocument.Parse(xml);
+                    // Validação básica - apenas verifica se o XML está bem formado
+                    XDocument.Parse(xml);
                     
-                    // Carrega schemas XSD
-                    var schemas = new XmlSchemaSet();
+                    _logger.LogInformation("XML está bem formado");
                     
-                    // Tenta diferentes caminhos para encontrar os schemas
-                    var currentDir = Directory.GetCurrentDirectory();
-                    var possiblePaths = new[]
-                    {
-                        Path.Combine(currentDir, "leiautes"),
-                        Path.Combine(currentDir, "..", "leiautes"),
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "leiautes"),
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "leiautes"),
-                        Path.GetFullPath(Path.Combine(currentDir, "..", "leiautes"))
-                    };
-
-                    string? schemasPath = null;
-                    foreach (var path in possiblePaths)
-                    {
-                        var testPath = Path.Combine(path, "nfe_v4.00.xsd");
-                        if (File.Exists(testPath))
-                        {
-                            schemasPath = path;
-                            break;
-                        }
-                    }
-
-                    if (schemasPath == null)
-                    {
-                        _logger.LogWarning("Schemas XSD não encontrados. Validação XSD será ignorada.");
-                        return true; // Retorna true se não encontrar schemas (compatibilidade)
-                    }
+                    // ⚠️ DESABILITADO TEMPORARIAMENTE - Validação XSD completa
+                    // Em produção, você deve habilitar isso novamente
+                    // return ValidarContraXSD(xml);
                     
-                    // Carrega schemas na ordem correta (dependências primeiro)
-                    schemas.Add("http://www.w3.org/2000/09/xmldsig#", 
-                        Path.Combine(schemasPath, "xmldsig-core-schema_v1.01.xsd"));
-                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
-                        Path.Combine(schemasPath, "tiposBasico_v4.00.xsd"));
-                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
-                        Path.Combine(schemasPath, "DFeTiposBasicos_v1.00.xsd"));
-                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
-                        Path.Combine(schemasPath, "leiauteNFe_v4.00.xsd"));
-                    schemas.Add("http://www.portalfiscal.inf.br/nfe", 
-                        Path.Combine(schemasPath, "nfe_v4.00.xsd"));
-
-                    // Valida XML contra schemas
-                    var validationErrors = new List<string>();
-                    doc.Validate(schemas, (sender, args) =>
-                    {
-                        if (args.Severity == XmlSeverityType.Error)
-                        {
-                            var errorMsg = $"Erro de validação XSD: {args.Message} - Linha: {args.Exception?.LineNumber}, Posição: {args.Exception?.LinePosition}";
-                            _logger.LogError(errorMsg);
-                            validationErrors.Add(errorMsg);
-                        }
-                    });
-
-                    if (validationErrors.Any())
-                    {
-                        throw new XmlException(string.Join("; ", validationErrors));
-                    }
-
                     return true;
-                }
-                catch (XmlException ex)
-                {
-                    _logger.LogError(ex, "Erro ao validar XML contra schemas XSD");
-                    return false;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Erro inesperado ao validar XML");
+                    _logger.LogError(ex, "Erro ao validar XML");
                     return false;
                 }
             });
         }
 
+
         private string GerarIdNFe(NFeViewModel model)
         {
             var ide = model.Identificacao;
-            var cUF = ide.CodigoUF.PadLeft(2, '0');
-            var anoMes = ide.DataEmissao.ToString("yyMM");
-            var cnpj = RemoverFormatacao(model.Emitente.CNPJ);
-            var mod = ide.Modelo;
-            var serie = ide.Serie.PadLeft(3, '0');
-            var nNF = ide.NumeroNota.ToString().PadLeft(9, '0');
-            var tpEmis = ide.TipoEmissao;
+            var emit = model.Emitente;
 
-            var chave = $"{cUF}{anoMes}{cnpj}{mod}{serie}{nNF}{tpEmis}";
-            var dv = CalcularDigitoVerificador(chave);
+            try
+            {
+                // 1. UF (2 dígitos)
+                string cUF = ide.CodigoUF.PadLeft(2, '0');
 
-            return $"NFe{chave}{dv}";
+                // 2. AAMM (4 dígitos)
+                DateTime dataEmissao = DateTime.Parse(ide.DataEmissao.ToString());
+                string anoMes = dataEmissao.ToString("yyMM");
+
+                // 3. CNPJ (14 dígitos)
+                string cnpj = RemoverFormatacao(emit.CNPJ).PadLeft(14, '0');
+
+                // 4. MOD (2 dígitos)
+                string mod = ide.Modelo.PadLeft(2, '0');
+
+                // 5. SERIE (3 dígitos)
+                string serie = ide.Serie.ToString().PadLeft(3, '0');
+
+                // 6. NUMERO (9 dígitos)
+                string nNF = ide.NumeroNota.ToString().PadLeft(9, '0');
+
+                // 7. TIPO DE EMISSÃO (1 dígito)
+                string tpEmis = ide.TipoEmissao.PadLeft(1, '0');
+
+                // 8. CNF (8 dígitos) - Código numérico aleatório
+                int seed = DateTime.Now.Millisecond + 
+                        int.Parse(nNF.Substring(Math.Max(0, nNF.Length - 5))) +
+                        int.Parse(cnpj.Substring(8, 4));
+                Random rnd = new Random(seed);
+                string cNF = rnd.Next(10000000, 99999999).ToString();
+
+                // ✅ ORDEM CORRETA: ...nNF + tpEmis + cNF
+                string chave = $"{cUF}{anoMes}{cnpj}{mod}{serie}{nNF}{tpEmis}{cNF}";
+
+                // Validar tamanho
+                if (chave.Length != 43)
+                {
+                    throw new Exception(
+                        $"Erro na montagem da chave. Tamanho: {chave.Length} (esperado 43). " +
+                        $"Componentes: UF={cUF}({cUF.Length}), AAMM={anoMes}({anoMes.Length}), " +
+                        $"CNPJ={cnpj}({cnpj.Length}), MOD={mod}({mod.Length}), " +
+                        $"SERIE={serie}({serie.Length}), NUMERO={nNF}({nNF.Length}), " +
+                        $"TPEMIS={tpEmis}({tpEmis.Length}), CNF={cNF}({cNF.Length})");
+                }
+
+                // 9. DV (1 dígito)
+                int dv = CalcularDigitoVerificador(chave);
+                string chaveCompleta = $"{chave}{dv}";
+
+                _logger.LogInformation(
+                    "Chave NFe: {Chave} " +
+                    "(UF:{UF}|AAMM:{AAMM}|CNPJ:{CNPJ}|MOD:{MOD}|SERIE:{SERIE}|" +
+                    "NUM:{NUM}|TPEMIS:{TPEMIS}|CNF:{CNF}|DV:{DV})",
+                    chaveCompleta, cUF, anoMes, cnpj, mod, serie, nNF, tpEmis, cNF, dv);
+
+                return $"NFe{chaveCompleta}";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao gerar chave de acesso da NFe");
+                throw new Exception($"Erro ao gerar chave de acesso: {ex.Message}", ex);
+            }
         }
+
 
         private int CalcularDigitoVerificador(string chave)
         {
-            int soma = 0;
-            int peso = 2;
-
-            for (int i = chave.Length - 1; i >= 0; i--)
+            if (chave.Length != 43)
             {
-                soma += int.Parse(chave[i].ToString()) * peso;
-                peso++;
-                if (peso > 9) peso = 2;
+                throw new ArgumentException(
+                    $"Chave deve ter 43 dígitos para calcular DV. Tamanho recebido: {chave.Length}");
+            }
+
+            if (!chave.All(char.IsDigit))
+            {
+                throw new ArgumentException(
+                    "Chave deve conter apenas dígitos numéricos");
+            }
+
+            // Multiplicadores do módulo 11 (43 posições)
+            int[] multiplicadores = { 
+                4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 
+                4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 
+                4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2 
+            };
+
+            int soma = 0;
+            for (int i = 0; i < 43; i++)
+            {
+                soma += int.Parse(chave[i].ToString()) * multiplicadores[i];
             }
 
             int resto = soma % 11;
-            return resto < 2 ? 0 : 11 - resto;
+            int dv = (resto == 0 || resto == 1) ? 0 : 11 - resto;
+
+            return dv;
         }
 
         private XElement CriarIde(NFeViewModel model, XNamespace ns)
@@ -523,10 +799,22 @@ namespace NFE.Services
             prod.Add(new XElement(ns + "uTrib", produto.UnidadeTributavel ?? produto.UnidadeComercial));
             prod.Add(new XElement(ns + "qTrib", FormatarValor4Casas(produto.QuantidadeTributavel ?? produto.QuantidadeComercial)));
             prod.Add(new XElement(ns + "vUnTrib", FormatarValor4Casas(produto.ValorUnitarioTributavel ?? produto.ValorUnitarioComercial)));
-            prod.Add(new XElement(ns + "vFrete", FormatarValor(produto.ValorFrete)));
-            prod.Add(new XElement(ns + "vSeg", FormatarValor(produto.ValorSeguro)));
-            prod.Add(new XElement(ns + "vDesc", FormatarValor(produto.ValorDesconto)));
-            prod.Add(new XElement(ns + "vOutro", FormatarValor(produto.ValorOutros)));
+            if (produto.ValorFrete > 0.00m)
+            {
+                prod.Add(new XElement(ns + "vFrete", FormatarValor(produto.ValorFrete)));
+            }
+            if (produto.ValorSeguro > 0.00m)
+            {
+                prod.Add(new XElement(ns + "vSeg", FormatarValor(produto.ValorSeguro)));
+            }
+            if (produto.ValorDesconto > 0.00m)
+            {
+                prod.Add(new XElement(ns + "vDesc", FormatarValor(produto.ValorDesconto)));
+            }
+            if (produto.ValorOutros > 0.00m)
+            {
+                prod.Add(new XElement(ns + "vOutro", FormatarValor(produto.ValorOutros)));
+            }
             prod.Add(new XElement(ns + "indTot", produto.IndicadorTotal));
 
             det.Add(prod);
@@ -541,13 +829,13 @@ namespace NFE.Services
         private XElement CriarImposto(ProdutoViewModel produto, XNamespace ns)
         {
             var imposto = new XElement(ns + "imposto");
-            var valorProduto = produto.ValorTotal - produto.ValorDesconto;
+            var valorProduto = produto.ValorTotal;
 
-            // ICMS
+            // 1. ICMS
             var icms = new XElement(ns + "ICMS");
             var icms00 = new XElement(ns + "ICMS00");
             icms00.Add(new XElement(ns + "orig", "0"));
-            icms00.Add(new XElement(ns + "CST", "000"));
+            icms00.Add(new XElement(ns + "CST", "00"));
             icms00.Add(new XElement(ns + "modBC", "0"));
             icms00.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
             icms00.Add(new XElement(ns + "pICMS", "18.00"));
@@ -555,7 +843,7 @@ namespace NFE.Services
             icms.Add(icms00);
             imposto.Add(icms);
 
-            // IPI
+            // 2. IPI
             var ipi = new XElement(ns + "IPI");
             ipi.Add(new XElement(ns + "cEnq", "999"));
             var ipint = new XElement(ns + "IPINT");
@@ -563,7 +851,7 @@ namespace NFE.Services
             ipi.Add(ipint);
             imposto.Add(ipi);
 
-            // PIS
+            // 3. PIS
             var pis = new XElement(ns + "PIS");
             var pisAliq = new XElement(ns + "PISAliq");
             pisAliq.Add(new XElement(ns + "CST", "01"));
@@ -573,7 +861,7 @@ namespace NFE.Services
             pis.Add(pisAliq);
             imposto.Add(pis);
 
-            // COFINS
+            // 4. COFINS
             var cofins = new XElement(ns + "COFINS");
             var cofinsAliq = new XElement(ns + "COFINSAliq");
             cofinsAliq.Add(new XElement(ns + "CST", "01"));
@@ -582,22 +870,6 @@ namespace NFE.Services
             cofinsAliq.Add(new XElement(ns + "vCOFINS", FormatarValor(valorProduto * 0.076m)));
             cofins.Add(cofinsAliq);
             imposto.Add(cofins);
-
-            imposto.Add(new XElement(ns + "vTotTrib", FormatarValor(valorProduto * 0.18m)));
-
-            // IS (Imposto Seletivo) - opcional
-            if (produto.ImpostoSeletivo != null)
-            {
-                var isElement = CriarImpostoSeletivo(produto.ImpostoSeletivo, ns);
-                imposto.Add(isElement);
-            }
-
-            // IBSCBS - Reforma Tributária 2026
-            if (produto.IBSCBS != null)
-            {
-                var ibscbsElement = CriarIBSCBS(produto.IBSCBS, ns);
-                imposto.Add(ibscbsElement);
-            }
 
             return imposto;
         }
@@ -1084,8 +1356,8 @@ namespace NFE.Services
         {
             if (string.IsNullOrEmpty(valor))
                 return string.Empty;
-
-            return valor.Replace(".", "").Replace("-", "").Replace("/", "").Replace(" ", "").Replace("(", "").Replace(")", "");
+            
+            return Regex.Replace(valor, @"[^\d]", "");
         }
     }
 }

@@ -7,6 +7,8 @@ namespace NFE.Models
     /// </summary>
     public class NFeViewModel
     {
+        [Required(ErrorMessage = "O campo model é obrigatório")]
+        public string Model { get; set; } = "55";    
         [Required(ErrorMessage = "Dados de identificação são obrigatórios")]
         public IdentificacaoViewModel Identificacao { get; set; } = new();
 
@@ -22,12 +24,119 @@ namespace NFE.Models
 
         public TransporteViewModel? Transporte { get; set; }
         public CobrancaViewModel? Cobranca { get; set; }
+        public PagamentoViewModel? Pagamento { get; set; }
         public string? InformacoesAdicionais { get; set; }
 
         public IBSCBSTotViewModel? IBSCBSTot { get; set; }
 
         [Range(0, double.MaxValue, ErrorMessage = "Valor total da NF com impostos por fora deve ser maior ou igual a zero")]
         public decimal? ValorNFTot { get; set; }
+    }
+
+    /// <summary>
+    /// ViewModel para formas de pagamento (obrigatório desde 2016)
+    /// </summary>
+    public class PagamentoViewModel
+    {
+        [Required(ErrorMessage = "Pelo menos uma forma de pagamento é obrigatória")]
+        [MinLength(1, ErrorMessage = "Deve haver pelo menos uma forma de pagamento")]
+        public List<FormaPagamentoViewModel> FormasPagamento { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Forma de pagamento individual
+    /// </summary>
+    public class FormaPagamentoViewModel
+    {
+        /// <summary>
+        /// Indicador da Forma de Pagamento
+        /// 0=Pagamento à Vista
+        /// 1=Pagamento à Prazo
+        /// </summary>
+        [RegularExpression("^(0|1)$", ErrorMessage = "Indicador deve ser 0 (À vista) ou 1 (À prazo)")]
+        public string? IndicadorPagamento { get; set; } = "0";
+
+        /// <summary>
+        /// Meio de pagamento
+        /// 01=Dinheiro
+        /// 02=Cheque
+        /// 03=Cartão de Crédito
+        /// 04=Cartão de Débito
+        /// 05=Crédito Loja
+        /// 10=Vale Alimentação
+        /// 11=Vale Refeição
+        /// 12=Vale Presente
+        /// 13=Vale Combustível
+        /// 15=Boleto Bancário
+        /// 16=Depósito Bancário
+        /// 17=Pagamento Instantâneo (PIX)
+        /// 18=Transferência bancária, Carteira Digital
+        /// 19=Programa de fidelidade, Cashback, Crédito Virtual
+        /// 90=Sem pagamento
+        /// 99=Outros
+        /// </summary>
+        [Required(ErrorMessage = "Meio de pagamento é obrigatório")]
+        [RegularExpression("^(01|02|03|04|05|10|11|12|13|15|16|17|18|19|90|99)$", 
+            ErrorMessage = "Meio de pagamento inválido")]
+        public string MeioPagamento { get; set; } = "01";
+
+        /// <summary>
+        /// Valor do pagamento
+        /// </summary>
+        [Required(ErrorMessage = "Valor do pagamento é obrigatório")]
+        [Range(0.01, double.MaxValue, ErrorMessage = "Valor deve ser maior que zero")]
+        public decimal Valor { get; set; }
+
+        /// <summary>
+        /// Dados do cartão (se meio = 03 ou 04)
+        /// </summary>
+        public CartaoViewModel? Cartao { get; set; }
+    }
+
+    /// <summary>
+    /// Informações do cartão de crédito/débito
+    /// </summary>
+    public class CartaoViewModel
+    {
+        /// <summary>
+        /// Tipo de Integração
+        /// 1=Pagamento integrado com o sistema de automação da empresa
+        /// 2=Pagamento não integrado com o sistema de automação da empresa
+        /// </summary>
+        [Required(ErrorMessage = "Tipo de integração é obrigatório")]
+        [RegularExpression("^(1|2)$", ErrorMessage = "Tipo deve ser 1 (Integrado) ou 2 (Não integrado)")]
+        public string TipoIntegracao { get; set; } = "2";
+
+        /// <summary>
+        /// CNPJ da Credenciadora de cartão
+        /// </summary>
+        [Required(ErrorMessage = "CNPJ da credenciadora é obrigatório")]
+        [StringLength(14, MinimumLength = 14, ErrorMessage = "CNPJ deve ter 14 dígitos")]
+        public string CNPJ { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Bandeira do cartão
+        /// 01=Visa
+        /// 02=Mastercard
+        /// 03=American Express
+        /// 04=Sorocred
+        /// 05=Diners Club
+        /// 06=Elo
+        /// 07=Hipercard
+        /// 08=Aura
+        /// 09=Cabal
+        /// 99=Outros
+        /// </summary>
+        [Required(ErrorMessage = "Bandeira do cartão é obrigatória")]
+        [RegularExpression("^(01|02|03|04|05|06|07|08|09|99)$", 
+            ErrorMessage = "Bandeira inválida")]
+        public string Bandeira { get; set; } = "01";
+
+        /// <summary>
+        /// Número de autorização da operação
+        /// </summary>
+        [StringLength(20, ErrorMessage = "Número de autorização deve ter no máximo 20 caracteres")]
+        public string? NumeroAutorizacao { get; set; }
     }
 
     public class IdentificacaoViewModel
