@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
 using System.Xml;
+using System.Xml.Linq;
+
 
 namespace NFE.Services
 {
@@ -68,9 +70,11 @@ namespace NFE.Services
             {
                 _logger.LogInformation("Iniciando assinatura do XML");
 
+                xml = NormalizarXML(xml);
+
                 // Carregar XML
                 XmlDocument doc = new XmlDocument();
-                doc.PreserveWhitespace = true;
+                doc.PreserveWhitespace = false;
                 doc.LoadXml(xml);
 
                 // Namespace da NFe
@@ -90,7 +94,7 @@ namespace NFE.Services
 
                 _logger.LogInformation("Assinando elemento: {RefUri}", refUri);
 
-                // ✅ CORREÇÃO: Obter chave privada ANTES de criar SignedXml
+                // Obter chave privada
                 var privateKey = certificado.GetRSAPrivateKey();
                 if (privateKey == null)
                     throw new Exception("Não foi possível obter chave privada do certificado");
@@ -99,16 +103,17 @@ namespace NFE.Services
                 SignedXml signedXml = new SignedXml(doc);
                 signedXml.SigningKey = privateKey;
 
-                // ✅ IMPORTANTE: Definir método de assinatura ANTES de adicionar referência
-                signedXml.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA256Url;
+                // ✅ ALTERAÇÃO CRÍTICA: NFe 4.00 exige SHA-1, não SHA-256
+                signedXml.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA1Url;
 
                 // Configurar referência
                 Reference reference = new Reference("#" + refUri);
                 reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
                 reference.AddTransform(new XmlDsigC14NTransform(false));
-                reference.DigestMethod = SignedXml.XmlDsigSHA256Url; // SHA256
                 
-                // ✅ Adicionar referência DEPOIS de configurar tudo
+                // ✅ ALTERAÇÃO CRÍTICA: DigestMethod também deve ser SHA-1
+                reference.DigestMethod = SignedXml.XmlDsigSHA1Url;
+                
                 signedXml.AddReference(reference);
 
                 // Adicionar informações do certificado
@@ -138,5 +143,53 @@ namespace NFE.Services
                 throw new Exception($"Erro ao assinar XML: {ex.Message}", ex);
             }
         }
+
+        private string NormalizarXML(string xml)
+        {
+            try
+            {
+                // Parse mantendo estrutura e namespaces
+                var doc = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+                
+                // Normalizar APENAS o conteúdo de texto dos elementos
+                foreach (var element in doc.Descendants())
+                {
+                    // Verificar se o elemento tem APENAS texto (não tem elementos filhos)
+                    if (element.HasElements == false && !string.IsNullOrWhiteSpace(element.Value))
+                    {
+                        // Remove espaços no início e fim
+                        string normalizado = element.Value.Trim();
+                        
+                        // Remove quebras de linha e múltiplos espaços
+                        normalizado = System.Text.RegularExpressions.Regex.Replace(
+                            normalizado, 
+                            @"\s+", 
+                            " "
+                        ).Trim();
+                        
+                        // Substitui caracteres especiais problemáticos
+                        normalizado = normalizado
+                            .Replace("ª", "a")
+                            .Replace("º", "o")
+                            .Replace("²", "2")
+                            .Replace("³", "3")
+                            .Replace("¹", "1");
+                        
+                        // Atualizar o valor
+                        element.Value = normalizado;
+                    }
+                }
+                
+                // Retorna XML sem formatação, MAS preservando namespaces
+                return doc.ToString(SaveOptions.DisableFormatting);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Erro ao normalizar XML, retornando original");
+                return xml;
+            }
+        }
+
+        
     }
 }

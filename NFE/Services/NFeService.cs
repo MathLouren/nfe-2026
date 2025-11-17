@@ -235,7 +235,7 @@ namespace NFE.Services
 
         //             nfe.Add(infNFe);
 
-        //             // ✅ NÃO ADICIONAR infNFeSupl para NFe modelo 55
+        //             // NÃO ADICIONAR infNFeSupl para NFe modelo 55
         //             // Só adicionar para NFCe (modelo 65) com QR Code
         //             // if (model.Identificacao.Modelo == "65")
         //             // {
@@ -268,31 +268,39 @@ namespace NFE.Services
                     _logger.LogInformation("Iniciando geração de XML da NFe");
                     
                     var ns = XNamespace.Get("http://www.portalfiscal.inf.br/nfe");
+                    
+                    // CRÍTICO: Gerar a chave UMA ÚNICA VEZ e armazenar
+                    string chaveAcesso = GerarChaveNFe(model);
+                    string idNFe = "NFe" + chaveAcesso;
+                    
+                    _logger.LogInformation("Chave NFe gerada: {ChaveNFe}", chaveAcesso);
+                    
                     var nfe = new XElement(ns + "NFe");
 
+                    // Usar a chave já gerada no atributo Id
                     var infNFe = new XElement(ns + "infNFe",
-                        new XAttribute("Id", GerarIdNFe(model)),
+                        new XAttribute("Id", idNFe),
                         new XAttribute("versao", "4.00")
                     );
 
-                    // 1. IDE
+                    // 1. IDE - PASSAR A CHAVE PARA EVITAR RECÁLCULO
                     _logger.LogInformation("Criando elemento IDE");
-                    infNFe.Add(CriarIde(model, ns));
+                    infNFe.Add(CriarIde(model, ns, chaveAcesso));
                     
                     // 2. EMIT
                     _logger.LogInformation("Criando elemento EMIT");
                     infNFe.Add(CriarEmitente(model, ns));
                     
-                    // 3. DEST
+                    // 3. DEST - PASSAR AMBIENTE PARA AJUSTAR NOME EM HOMOLOGAÇÃO
                     _logger.LogInformation("Criando elemento DEST");
-                    infNFe.Add(CriarDestinatario(model, ns));
+                    infNFe.Add(CriarDestinatario(model, ns, model.Identificacao.Ambiente));
                     
                     // 4. DET (Produtos)
                     _logger.LogInformation("Criando elementos DET - {Count} produtos", model.Produtos.Count);
                     int nItem = 1;
                     foreach (var produto in model.Produtos)
                     {
-                        infNFe.Add(CriarDetalhe(produto, ns, nItem++));
+                        infNFe.Add(CriarDetalhe(produto, ns, nItem++, model.Emitente.CodigoRegimeTributario));
                     }
 
                     // 5. TOTAL
@@ -356,7 +364,7 @@ namespace NFE.Services
                         nfe
                     );
 
-                    string xmlString = xmlDocument.ToString();
+                    string xmlString = xmlDocument.ToString(SaveOptions.DisableFormatting);
                     
                     _logger.LogInformation("XML gerado - Tamanho: {Size} bytes", xmlString.Length);
                     
@@ -375,6 +383,7 @@ namespace NFE.Services
                 }
             });
         }
+
 
         private XElement CriarPagamento(FormaPagamentoViewModel forma, XNamespace ns)
         {
@@ -514,7 +523,7 @@ namespace NFE.Services
                     
                     _logger.LogInformation("XML está bem formado");
                     
-                    // ⚠️ DESABILITADO TEMPORARIAMENTE - Validação XSD completa
+                    // DESABILITADO TEMPORARIAMENTE - Validação XSD completa
                     // Em produção, você deve habilitar isso novamente
                     // return ValidarContraXSD(xml);
                     
@@ -565,7 +574,7 @@ namespace NFE.Services
                 Random rnd = new Random(seed);
                 string cNF = rnd.Next(10000000, 99999999).ToString();
 
-                // ✅ ORDEM CORRETA: ...nNF + tpEmis + cNF
+                // ORDEM CORRETA: ...nNF + tpEmis + cNF
                 string chave = $"{cUF}{anoMes}{cnpj}{mod}{serie}{nNF}{tpEmis}{cNF}";
 
                 // Validar tamanho
@@ -632,23 +641,26 @@ namespace NFE.Services
             return dv;
         }
 
-        private XElement CriarIde(NFeViewModel model, XNamespace ns)
+        private XElement CriarIde(NFeViewModel model, XNamespace ns, string chaveAcesso)
         {
             var ide = model.Identificacao;
             var ideElement = new XElement(ns + "ide");
 
-            // Calcula cDV corretamente
-            var chaveAcesso = GerarIdNFe(model).Replace("NFe", "");
-            var cDV = chaveAcesso.Substring(chaveAcesso.Length - 1);
+            // Extrair componentes da chave de acesso
+            string cUF = chaveAcesso.Substring(0, 2);
+            string cNF = chaveAcesso.Substring(35, 8);
+            string cDV = chaveAcesso.Substring(43, 1);
 
-            ideElement.Add(new XElement(ns + "cUF", ide.CodigoUF));
-            ideElement.Add(new XElement(ns + "cNF", new Random().Next(10000000, 99999999).ToString()));
+            ideElement.Add(new XElement(ns + "cUF", cUF));
+            ideElement.Add(new XElement(ns + "cNF", cNF));
             ideElement.Add(new XElement(ns + "natOp", ide.NaturezaOperacao));
             ideElement.Add(new XElement(ns + "mod", ide.Modelo));
             ideElement.Add(new XElement(ns + "serie", ide.Serie));
             ideElement.Add(new XElement(ns + "nNF", ide.NumeroNota));
-            ideElement.Add(new XElement(ns + "dhEmi", FormatarDataHoraUTC(ide.DataEmissao)));
             
+            // FORÇA A DATA ATUAL (que foi usada para gerar a chave)
+            ideElement.Add(new XElement(ns + "dhEmi", DateTime.Now.ToString("yyyy-MM-ddTHH:mm:sszzz")));
+
             if (ide.DataSaidaEntrada != default)
             {
                 ideElement.Add(new XElement(ns + "dhSaiEnt", FormatarDataHoraUTC(ide.DataSaidaEntrada)));
@@ -662,7 +674,7 @@ namespace NFE.Services
             ideElement.Add(new XElement(ns + "tpNF", ide.TipoOperacao));
             ideElement.Add(new XElement(ns + "idDest", ide.IdentificadorLocalDestino));
             ideElement.Add(new XElement(ns + "cMunFG", ide.CodigoMunicipioFatoGerador));
-            
+
             if (!string.IsNullOrEmpty(ide.CodigoMunicipioFGIBS))
             {
                 ideElement.Add(new XElement(ns + "cMunFGIBS", ide.CodigoMunicipioFGIBS));
@@ -670,10 +682,10 @@ namespace NFE.Services
 
             ideElement.Add(new XElement(ns + "tpImp", ide.TipoImpressao));
             ideElement.Add(new XElement(ns + "tpEmis", ide.TipoEmissao));
-            ideElement.Add(new XElement(ns + "cDV", cDV));
+            ideElement.Add(new XElement(ns + "cDV", cDV)); // ✅ Usar DV da chave
             ideElement.Add(new XElement(ns + "tpAmb", ide.Ambiente));
             ideElement.Add(new XElement(ns + "finNFe", ide.Finalidade));
-            
+
             if (!string.IsNullOrEmpty(ide.TipoNFDebito))
             {
                 ideElement.Add(new XElement(ns + "tpNFDebito", ide.TipoNFDebito));
@@ -686,7 +698,7 @@ namespace NFE.Services
 
             ideElement.Add(new XElement(ns + "indFinal", ide.IndicadorConsumidorFinal));
             ideElement.Add(new XElement(ns + "indPres", ide.IndicadorPresenca));
-            
+
             if (!string.IsNullOrEmpty(ide.IndicadorIntermediador))
             {
                 ideElement.Add(new XElement(ns + "indIntermed", ide.IndicadorIntermediador));
@@ -737,7 +749,7 @@ namespace NFE.Services
             return emitElement;
         }
 
-        private XElement CriarDestinatario(NFeViewModel model, XNamespace ns)
+        private XElement CriarDestinatario(NFeViewModel model, XNamespace ns, string ambiente)
         {
             var dest = model.Destinatario;
             var destElement = new XElement(ns + "dest");
@@ -751,15 +763,25 @@ namespace NFE.Services
                 destElement.Add(new XElement(ns + "CPF", RemoverFormatacao(dest.Documento)));
             }
 
-            destElement.Add(new XElement(ns + "xNome", dest.NomeRazaoSocial));
+            // CORREÇÃO: Ajustar nome para homologação
+            string nomeDestinatario = dest.NomeRazaoSocial;
+            
+            if (ambiente == "2" || ambiente.ToLower() == "homologacao")
+            {
+                nomeDestinatario = "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL";
+            }
+            
+            destElement.Add(new XElement(ns + "xNome", nomeDestinatario)); // ✅ UMA ÚNICA VEZ
 
             var enderDest = new XElement(ns + "enderDest");
             enderDest.Add(new XElement(ns + "xLgr", dest.Endereco.Logradouro));
             enderDest.Add(new XElement(ns + "nro", dest.Endereco.Numero));
+            
             if (!string.IsNullOrEmpty(dest.Endereco.Complemento))
             {
                 enderDest.Add(new XElement(ns + "xCpl", dest.Endereco.Complemento));
             }
+            
             enderDest.Add(new XElement(ns + "xBairro", dest.Endereco.Bairro));
             enderDest.Add(new XElement(ns + "cMun", dest.Endereco.CodigoMunicipio));
             enderDest.Add(new XElement(ns + "xMun", dest.Endereco.NomeMunicipio));
@@ -767,6 +789,7 @@ namespace NFE.Services
             enderDest.Add(new XElement(ns + "CEP", RemoverFormatacao(dest.Endereco.CEP)));
             enderDest.Add(new XElement(ns + "cPais", "1058"));
             enderDest.Add(new XElement(ns + "xPais", "BRASIL"));
+            
             if (!string.IsNullOrEmpty(dest.Endereco.Telefone))
             {
                 enderDest.Add(new XElement(ns + "fone", RemoverFormatacao(dest.Endereco.Telefone)));
@@ -783,7 +806,8 @@ namespace NFE.Services
             return destElement;
         }
 
-        private XElement CriarDetalhe(ProdutoViewModel produto, XNamespace ns, int nItem)
+
+        private XElement CriarDetalhe(ProdutoViewModel produto, XNamespace ns, int nItem, string codigoRegimeTributario)
         {
             var det = new XElement(ns + "det", new XAttribute("nItem", nItem));
 
@@ -822,27 +846,39 @@ namespace NFE.Services
             det.Add(prod);
 
             // imposto
-            var imposto = CriarImposto(produto, ns);
+            var imposto = CriarImposto(produto, ns, codigoRegimeTributario);
             det.Add(imposto);
 
             return det;
         }
 
-        private XElement CriarImposto(ProdutoViewModel produto, XNamespace ns)
+        private XElement CriarImposto(ProdutoViewModel produto, XNamespace ns, string codigoRegimeTributario)
         {
             var imposto = new XElement(ns + "imposto");
             var valorProduto = produto.ValorTotal;
 
             // 1. ICMS
             var icms = new XElement(ns + "ICMS");
-            var icms00 = new XElement(ns + "ICMS00");
-            icms00.Add(new XElement(ns + "orig", "0"));
-            icms00.Add(new XElement(ns + "CST", "00"));
-            icms00.Add(new XElement(ns + "modBC", "0"));
-            icms00.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
-            icms00.Add(new XElement(ns + "pICMS", "18.00"));
-            icms00.Add(new XElement(ns + "vICMS", FormatarValor(valorProduto * 0.18m)));
-            icms.Add(icms00);
+            
+            if (codigoRegimeTributario == "1")
+            {
+                var icmssn102 = new XElement(ns + "ICMSSN102");
+                icmssn102.Add(new XElement(ns + "orig", "0"));
+                icmssn102.Add(new XElement(ns + "CSOSN", "102"));
+                icms.Add(icmssn102);
+            }
+            else
+            {
+                var icms00 = new XElement(ns + "ICMS00");
+                icms00.Add(new XElement(ns + "orig", "0"));
+                icms00.Add(new XElement(ns + "CST", "00"));
+                icms00.Add(new XElement(ns + "modBC", "0"));
+                icms00.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
+                icms00.Add(new XElement(ns + "pICMS", "18.00"));
+                icms00.Add(new XElement(ns + "vICMS", FormatarValor(valorProduto * 0.18m)));
+                icms.Add(icms00);
+            }
+            
             imposto.Add(icms);
 
             // 2. IPI
@@ -855,73 +891,157 @@ namespace NFE.Services
 
             // 3. PIS
             var pis = new XElement(ns + "PIS");
-            var pisAliq = new XElement(ns + "PISAliq");
-            pisAliq.Add(new XElement(ns + "CST", "01"));
-            pisAliq.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
-            pisAliq.Add(new XElement(ns + "pPIS", "1.65"));
-            pisAliq.Add(new XElement(ns + "vPIS", FormatarValor(valorProduto * 0.0165m)));
-            pis.Add(pisAliq);
+            
+            if (codigoRegimeTributario == "1")
+            {
+                // Usar PISOutr para Simples Nacional
+                var pisOutr = new XElement(ns + "PISOutr");
+                pisOutr.Add(new XElement(ns + "CST", "99")); // 99 = Outras operações
+                pisOutr.Add(new XElement(ns + "vBC", "0.00"));
+                pisOutr.Add(new XElement(ns + "pPIS", "0.00"));
+                pisOutr.Add(new XElement(ns + "vPIS", "0.00"));
+                pis.Add(pisOutr);
+            }
+            else
+            {
+                var pisAliq = new XElement(ns + "PISAliq");
+                pisAliq.Add(new XElement(ns + "CST", "01"));
+                pisAliq.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
+                pisAliq.Add(new XElement(ns + "pPIS", "1.65"));
+                pisAliq.Add(new XElement(ns + "vPIS", FormatarValor(valorProduto * 0.0165m)));
+                pis.Add(pisAliq);
+            }
+            
             imposto.Add(pis);
 
             // 4. COFINS
             var cofins = new XElement(ns + "COFINS");
-            var cofinsAliq = new XElement(ns + "COFINSAliq");
-            cofinsAliq.Add(new XElement(ns + "CST", "01"));
-            cofinsAliq.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
-            cofinsAliq.Add(new XElement(ns + "pCOFINS", "7.60"));
-            cofinsAliq.Add(new XElement(ns + "vCOFINS", FormatarValor(valorProduto * 0.076m)));
-            cofins.Add(cofinsAliq);
+            
+            if (codigoRegimeTributario == "1")
+            {
+                // CORREÇÃO: Usar COFINSOutr para Simples Nacional
+                var cofinsOutr = new XElement(ns + "COFINSOutr");
+                cofinsOutr.Add(new XElement(ns + "CST", "99")); // 99 = Outras operações
+                cofinsOutr.Add(new XElement(ns + "vBC", "0.00"));
+                cofinsOutr.Add(new XElement(ns + "pCOFINS", "0.00"));
+                cofinsOutr.Add(new XElement(ns + "vCOFINS", "0.00"));
+                cofins.Add(cofinsOutr);
+            }
+            else
+            {
+                var cofinsAliq = new XElement(ns + "COFINSAliq");
+                cofinsAliq.Add(new XElement(ns + "CST", "01"));
+                cofinsAliq.Add(new XElement(ns + "vBC", FormatarValor(valorProduto)));
+                cofinsAliq.Add(new XElement(ns + "pCOFINS", "7.60"));
+                cofinsAliq.Add(new XElement(ns + "vCOFINS", FormatarValor(valorProduto * 0.076m)));
+                cofins.Add(cofinsAliq);
+            }
+            
             imposto.Add(cofins);
 
             return imposto;
         }
+
+
+
+
+        private string GerarChaveNFe(NFeViewModel model)
+        {
+            // Estrutura: cUF (2) + AAMM (4) + CNPJ (14) + mod (2) + serie (3) + nNF (9) + tpEmis (1) + cNF (8) + cDV (1) = 44 dígitos
+            
+            string cUF = model.Identificacao.CodigoUF;
+            
+            string AAMM = DateTime.Now.ToString("yyMM");
+            
+            string CNPJ = RemoverFormatacao(model.Emitente.CNPJ).PadLeft(14, '0');
+            string mod = "55";
+            string serie = model.Identificacao.Serie.ToString().PadLeft(3, '0');
+            string nNF = model.Identificacao.NumeroNota.ToString().PadLeft(9, '0');
+            string tpEmis = "1";
+            string cNF = new Random().Next(10000000, 99999999).ToString();
+            
+            // Concatenar sem o DV
+            string chave43 = cUF + AAMM + CNPJ + mod + serie + nNF + tpEmis + cNF;
+            
+            // Calcular DV
+            string cDV = CalcularDigitoVerificador(chave43).ToString();
+            
+            string chaveCompleta = chave43 + cDV;
+            
+            _logger.LogInformation("Chave NFe: {Chave} (UF:{cUF}|AAMM:{AAMM}|CNPJ:{CNPJ}|MOD:{mod}|SERIE:{serie}|NUM:{nNF}|TPEMIS:{tpEmis}|CNF:{cNF}|DV:{cDV})", 
+                chaveCompleta, cUF, AAMM, CNPJ, mod, serie, nNF, tpEmis, cNF, cDV);
+            
+            return chaveCompleta;
+        }
+
+
+        private string ObterCodigoUF(string uf)
+        {
+            var mapeamentoUF = new Dictionary<string, string>
+            {
+                { "AC", "12" }, { "AL", "27" }, { "AP", "16" }, { "AM", "13" },
+                { "BA", "29" }, { "CE", "23" }, { "DF", "53" }, { "ES", "32" },
+                { "GO", "52" }, { "MA", "21" }, { "MT", "51" }, { "MS", "50" },
+                { "MG", "31" }, { "PA", "15" }, { "PB", "25" }, { "PR", "41" },
+                { "PE", "26" }, { "PI", "22" }, { "RJ", "33" }, { "RN", "24" },
+                { "RS", "43" }, { "RO", "11" }, { "RR", "14" }, { "SC", "42" },
+                { "SP", "35" }, { "SE", "28" }, { "TO", "17" }
+            };
+
+            if (mapeamentoUF.TryGetValue(uf.ToUpper(), out string? codigo))
+            {
+                return codigo;
+            }
+
+            _logger.LogWarning("UF {UF} não encontrada no mapeamento, retornando código padrão 33 (RJ)", uf);
+            return "33"; // Padrão: RJ
+        }
+
+
 
         private XElement CriarTotal(NFeViewModel model, XNamespace ns)
         {
             var total = new XElement(ns + "total");
             var icmsTot = new XElement(ns + "ICMSTot");
 
-            var valorTotal = model.Produtos.Sum(p => p.ValorTotal - p.ValorDesconto);
-            var valorDesconto = model.Produtos.Sum(p => p.ValorDesconto);
+            var valorProdutos = model.Produtos.Sum(p => p.ValorTotal);
+            
+            // Para Simples Nacional CSOSN 102, BC ICMS = 0
+            decimal baseCalculoICMS = 0.00m;
+            decimal valorICMS = 0.00m;
+            
+            // Se não for Simples Nacional, calcular ICMS
+            if (model.Emitente.CodigoRegimeTributario != "1")
+            {
+                baseCalculoICMS = valorProdutos;
+                valorICMS = valorProdutos * 0.18m; // 18% exemplo
+            }
 
-            icmsTot.Add(new XElement(ns + "vBC", FormatarValor(valorTotal)));
-            icmsTot.Add(new XElement(ns + "vICMS", FormatarValor(valorTotal * 0.18m)));
+            icmsTot.Add(new XElement(ns + "vBC", FormatarValor(baseCalculoICMS))); // ✅ 0.00 para SN
+            icmsTot.Add(new XElement(ns + "vICMS", FormatarValor(valorICMS))); // ✅ 0.00 para SN
             icmsTot.Add(new XElement(ns + "vICMSDeson", "0.00"));
             icmsTot.Add(new XElement(ns + "vFCP", "0.00"));
             icmsTot.Add(new XElement(ns + "vBCST", "0.00"));
             icmsTot.Add(new XElement(ns + "vST", "0.00"));
             icmsTot.Add(new XElement(ns + "vFCPST", "0.00"));
             icmsTot.Add(new XElement(ns + "vFCPSTRet", "0.00"));
-            icmsTot.Add(new XElement(ns + "vProd", FormatarValor(valorTotal)));
-            icmsTot.Add(new XElement(ns + "vFrete", FormatarValor(model.Produtos.Sum(p => p.ValorFrete))));
-            icmsTot.Add(new XElement(ns + "vSeg", FormatarValor(model.Produtos.Sum(p => p.ValorSeguro))));
-            icmsTot.Add(new XElement(ns + "vDesc", FormatarValor(valorDesconto)));
+            icmsTot.Add(new XElement(ns + "vProd", FormatarValor(valorProdutos)));
+            icmsTot.Add(new XElement(ns + "vFrete", "0.00"));
+            icmsTot.Add(new XElement(ns + "vSeg", "0.00"));
+            icmsTot.Add(new XElement(ns + "vDesc", "0.00"));
             icmsTot.Add(new XElement(ns + "vII", "0.00"));
             icmsTot.Add(new XElement(ns + "vIPI", "0.00"));
             icmsTot.Add(new XElement(ns + "vIPIDevol", "0.00"));
-            icmsTot.Add(new XElement(ns + "vPIS", FormatarValor(valorTotal * 0.0165m)));
-            icmsTot.Add(new XElement(ns + "vCOFINS", FormatarValor(valorTotal * 0.076m)));
-            icmsTot.Add(new XElement(ns + "vOutro", FormatarValor(model.Produtos.Sum(p => p.ValorOutros))));
-            icmsTot.Add(new XElement(ns + "vNF", FormatarValor(valorTotal)));
-            icmsTot.Add(new XElement(ns + "vTotTrib", FormatarValor(valorTotal * 0.18m)));
+            icmsTot.Add(new XElement(ns + "vPIS", "0.00")); // ✅ 0 para SN
+            icmsTot.Add(new XElement(ns + "vCOFINS", "0.00")); // ✅ 0 para SN
+            icmsTot.Add(new XElement(ns + "vOutro", "0.00"));
+            icmsTot.Add(new XElement(ns + "vNF", FormatarValor(valorProdutos)));
+            icmsTot.Add(new XElement(ns + "vTotTrib", "0.00"));
 
             total.Add(icmsTot);
-
-            // IBSCBSTot - Reforma Tributária 2026
-            if (model.IBSCBSTot != null)
-            {
-                var ibscbsTot = CriarIBSCBSTot(model.IBSCBSTot, ns);
-                total.Add(ibscbsTot);
-            }
-
-            // vNFTot - Valor Total com impostos por fora
-            if (model.ValorNFTot.HasValue)
-            {
-                total.Add(new XElement(ns + "vNFTot", FormatarValor(model.ValorNFTot.Value)));
-            }
-
             return total;
         }
+
 
         private XElement CriarTransporte(TransporteViewModel transporte, XNamespace ns)
         {

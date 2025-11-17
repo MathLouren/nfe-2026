@@ -71,6 +71,9 @@ namespace NFE.Services
                 _logger.LogInformation("Resposta recebida - Status: {StatusCode}, Tamanho: {Size} bytes", 
                     response.StatusCode, responseXml.Length);
 
+                Console.WriteLine("Enviando requisicao: " + response);
+                Console.WriteLine("Resposta da requisicao: " + responseXml);
+
                 // Processar resposta
                 if (response.IsSuccessStatusCode)
                 {
