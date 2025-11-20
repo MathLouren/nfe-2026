@@ -939,6 +939,20 @@ namespace NFE.Services
             
             imposto.Add(cofins);
 
+            // 5. IBS/CBS (Reforma Tributária 2026)
+            if (produto.IBSCBS != null)
+            {
+                var ibscbsElement = CriarIBSCBS(produto.IBSCBS, ns);
+                imposto.Add(ibscbsElement);
+            }
+
+            // 6. Imposto Seletivo (IS)
+            if (produto.ImpostoSeletivo != null)
+            {
+                var isElement = CriarImpostoSeletivo(produto.ImpostoSeletivo, ns);
+                imposto.Add(isElement);
+            }
+
             return imposto;
         }
 
@@ -1035,10 +1049,17 @@ namespace NFE.Services
             icmsTot.Add(new XElement(ns + "vPIS", "0.00")); // ✅ 0 para SN
             icmsTot.Add(new XElement(ns + "vCOFINS", "0.00")); // ✅ 0 para SN
             icmsTot.Add(new XElement(ns + "vOutro", "0.00"));
-            icmsTot.Add(new XElement(ns + "vNF", FormatarValor(valorProdutos)));
+            icmsTot.Add(new XElement(ns + "vNF", FormatarValor(model.ValorNFTot ?? valorProdutos)));
             icmsTot.Add(new XElement(ns + "vTotTrib", "0.00"));
 
             total.Add(icmsTot);
+
+            if (model.IBSCBSTot != null)
+            {
+                var ibscbsTotElement = CriarIBSCBSTot(model.IBSCBSTot, ns);
+                total.Add(ibscbsTotElement);
+            }
+
             return total;
         }
 
