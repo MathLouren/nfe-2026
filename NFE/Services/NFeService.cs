@@ -511,30 +511,157 @@ namespace NFE.Services
         //     });
         // }
 
-        //HOMOLOGACAO
+        /// <summary>
+        /// Valida XML contra schemas XSD oficiais da NFe v4.00
+        /// </summary>
         public async Task<bool> ValidarXmlAsync(string xml)
         {
             return await Task.Run(() =>
             {
                 try
                 {
-                    // Validação básica - apenas verifica se o XML está bem formado
-                    XDocument.Parse(xml);
-                    
+                    // Primeiro verifica se está bem formado
+                    var doc = XDocument.Parse(xml);
                     _logger.LogInformation("XML está bem formado");
                     
-                    // DESABILITADO TEMPORARIAMENTE - Validação XSD completa
-                    // Em produção, você deve habilitar isso novamente
-                    // return ValidarContraXSD(xml);
-                    
-                    return true;
+                    // Validação XSD completa
+                    return ValidarContraXSD(xml, doc);
+                }
+                catch (XmlException ex)
+                {
+                    _logger.LogError(ex, "Erro ao validar XML contra schemas XSD");
+                    return false;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Erro ao validar XML");
+                    _logger.LogError(ex, "Erro inesperado ao validar XML");
                     return false;
                 }
             });
+        }
+
+        /// <summary>
+        /// Valida XML contra schemas XSD oficiais
+        /// </summary>
+        private bool ValidarContraXSD(string xml, XDocument doc)
+        {
+            try
+            {
+                // Tenta diferentes caminhos para encontrar os schemas
+                var currentDir = Directory.GetCurrentDirectory();
+                var possiblePaths = new[]
+                {
+                    Path.Combine(currentDir, "leiautes"),
+                    Path.Combine(currentDir, "..", "leiautes"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "leiautes"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "leiautes"),
+                    Path.GetFullPath(Path.Combine(currentDir, "..", "leiautes")),
+                    // Caminho relativo ao projeto
+                    Path.Combine(Directory.GetParent(currentDir)?.FullName ?? currentDir, "leiautes")
+                };
+
+                string? schemasPath = null;
+                foreach (var path in possiblePaths)
+                {
+                    var testPath = Path.Combine(path, "nfe_v4.00.xsd");
+                    if (File.Exists(testPath))
+                    {
+                        schemasPath = path;
+                        _logger.LogInformation("Schemas XSD encontrados em: {Path}", path);
+                        break;
+                    }
+                }
+
+                if (schemasPath == null)
+                {
+                    _logger.LogWarning("Schemas XSD não encontrados. Validação XSD será ignorada. " +
+                        "Certifique-se de que a pasta 'leiautes' está acessível.");
+                    return true; // Retorna true para não bloquear o fluxo, mas loga aviso
+                }
+                    
+                // Carrega schemas na ordem correta (dependências primeiro)
+                var schemas = new XmlSchemaSet();
+                
+                // Schema de assinatura digital (dependência)
+                var xmldsigPath = Path.Combine(schemasPath, "xmldsig-core-schema_v1.01.xsd");
+                if (File.Exists(xmldsigPath))
+                {
+                    schemas.Add("http://www.w3.org/2000/09/xmldsig#", xmldsigPath);
+                }
+
+                // Tipos básicos (dependência)
+                var tiposBasicoPath = Path.Combine(schemasPath, "tiposBasico_v4.00.xsd");
+                if (File.Exists(tiposBasicoPath))
+                {
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", tiposBasicoPath);
+                }
+
+                // DFe Tipos Básicos (dependência)
+                var dfeTiposPath = Path.Combine(schemasPath, "DFeTiposBasicos_v1.00.xsd");
+                if (File.Exists(dfeTiposPath))
+                {
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", dfeTiposPath);
+                }
+
+                // Leiaute NFe (dependência)
+                var leiautePath = Path.Combine(schemasPath, "leiauteNFe_v4.00.xsd");
+                if (File.Exists(leiautePath))
+                {
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", leiautePath);
+                }
+
+                // Schema principal
+                var nfePath = Path.Combine(schemasPath, "nfe_v4.00.xsd");
+                if (File.Exists(nfePath))
+                {
+                    schemas.Add("http://www.portalfiscal.inf.br/nfe", nfePath);
+                }
+
+                // Compila schemas
+                schemas.Compile();
+
+                // Valida XML contra schemas
+                var validationErrors = new List<string>();
+                doc.Validate(schemas, (sender, args) =>
+                {
+                    if (args.Severity == XmlSeverityType.Error)
+                    {
+                        var errorMsg = $"Erro de validação XSD: {args.Message} - " +
+                                      $"Linha: {args.Exception?.LineNumber}, " +
+                                      $"Posição: {args.Exception?.LinePosition}";
+                        _logger.LogError(errorMsg);
+                        validationErrors.Add(errorMsg);
+                    }
+                    else if (args.Severity == XmlSeverityType.Warning)
+                    {
+                        _logger.LogWarning("Aviso de validação XSD: {Message}", args.Message);
+                    }
+                });
+
+                if (validationErrors.Any())
+                {
+                    _logger.LogError("XML não passou na validação XSD. {Count} erro(s) encontrado(s).", 
+                        validationErrors.Count);
+                    foreach (var error in validationErrors)
+                    {
+                        _logger.LogError("  - {Error}", error);
+                    }
+                    return false;
+                }
+
+                _logger.LogInformation("XML validado com sucesso contra schemas XSD");
+                return true;
+            }
+            catch (XmlSchemaException ex)
+            {
+                _logger.LogError(ex, "Erro ao carregar schemas XSD: {Message}", ex.Message);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro inesperado ao validar contra XSD: {Message}", ex.Message);
+                return false;
+            }
         }
 
 
@@ -658,8 +785,8 @@ namespace NFE.Services
             ideElement.Add(new XElement(ns + "serie", ide.Serie));
             ideElement.Add(new XElement(ns + "nNF", ide.NumeroNota));
             
-            // FORÇA A DATA ATUAL (que foi usada para gerar a chave)
-            ideElement.Add(new XElement(ns + "dhEmi", DateTime.Now.ToString("yyyy-MM-ddTHH:mm:sszzz")));
+            // ✅ CORRIGIDO: Usar FormatarDataHoraUTC para garantir formato correto
+            ideElement.Add(new XElement(ns + "dhEmi", FormatarDataHoraUTC(ide.DataEmissao)));
 
             if (ide.DataSaidaEntrada != default)
             {

@@ -69,3 +69,4 @@ C:\Users\user\Desktop\nfes_2026\NFE\obj\Debug\net9.0\NFE.pdb
 C:\Users\user\Desktop\nfes_2026\NFE\obj\Debug\net9.0\NFE.genruntimeconfig.cache
 C:\Users\user\Desktop\nfes_2026\NFE\obj\Debug\net9.0\ref\NFE.dll
 C:\Users\user\Desktop\nfes_2026\NFE\obj\Debug\net9.0\NFE.sourcelink.json
+C:\Users\user\Desktop\nfes_2026\NFE\bin\Debug\net9.0\ExemploNFSe.json

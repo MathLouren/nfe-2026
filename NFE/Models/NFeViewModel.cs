@@ -154,6 +154,7 @@ namespace NFE.Models
         public string Modelo { get; set; } = "55";
 
         [Required(ErrorMessage = "Série é obrigatória")]
+        [RegularExpression("^(0|[1-9][0-9]{0,2})$", ErrorMessage = "Série deve ser 0 ou um número entre 1 e 999 (não pode começar com 0, exceto se for exatamente '0')")]
         [StringLength(3, ErrorMessage = "Série deve ter no máximo 3 caracteres")]
         public string Serie { get; set; } = "1";
 

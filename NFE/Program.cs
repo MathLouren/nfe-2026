@@ -34,6 +34,13 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient<WebServiceClient>();
 builder.Services.AddScoped<IWebServiceClient, WebServiceClient>();
 builder.Services.AddScoped<INFeService, NFeService>();
+
+// Register NFS-e services
+builder.Services.AddHttpClient<NFSeWebServiceClient>();
+builder.Services.AddScoped<INFSeWebServiceClient, NFSeWebServiceClient>();
+builder.Services.AddScoped<INFSeService, NFSeService>();
+
+// Shared services
 builder.Services.AddScoped<AssinaturaDigital>();
 
 

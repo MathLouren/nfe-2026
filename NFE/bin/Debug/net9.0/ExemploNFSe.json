@@ -1,0 +1,99 @@
+{
+  "identificacao": {
+    "codigoUF": "35",
+    "codigoMunicipio": "3550308",
+    "naturezaOperacao": "PRESTAÇÃO DE SERVIÇOS DE DESENVOLVIMENTO DE SOFTWARE",
+    "regimeEspecialTributacao": "1",
+    "optanteSimplesNacional": "2",
+    "incentivadorCultural": "2",
+    "numeroNFSe": 1,
+    "dataEmissao": "2026-01-15T10:30:00-03:00",
+    "ambiente": "2",
+    "codigoMunicipioFGIBS": null,
+    "indicadorPresenca": "1"
+  },
+  "prestador": {
+    "cnpj": "12345678000195",
+    "cpf": null,
+    "razaoSocial": "EMPRESA DE SOFTWARE LTDA",
+    "nomeFantasia": "SOFTWARE LTDA",
+    "inscricaoMunicipal": "12345678",
+    "inscricaoEstadual": "123456789012",
+    "endereco": {
+      "logradouro": "RUA DAS FLORES",
+      "numero": "123",
+      "complemento": "SALA 10",
+      "bairro": "CENTRO",
+      "codigoMunicipio": "3550308",
+      "nomeMunicipio": "SAO PAULO",
+      "uf": "SP",
+      "cep": "01000000"
+    },
+    "telefone": "1133334444",
+    "email": "contato@softwareltda.com.br"
+  },
+  "tomador": {
+    "tipo": "PJ",
+    "documento": "11222333000181",
+    "nomeRazaoSocial": "CLIENTE EXEMPLO LTDA",
+    "endereco": {
+      "logradouro": "AVENIDA PRINCIPAL",
+      "numero": "456",
+      "complemento": null,
+      "bairro": "JARDIM AMERICA",
+      "codigoMunicipio": "3550308",
+      "nomeMunicipio": "SAO PAULO",
+      "uf": "SP",
+      "cep": "02000000"
+    },
+    "telefone": "1199998888",
+    "email": "contato@clienteexemplo.com.br",
+    "inscricaoEstadual": "987654321098",
+    "inscricaoMunicipal": null
+  },
+  "servicos": [
+    {
+      "codigo": "001",
+      "descricao": "Desenvolvimento de Software",
+      "codigoClassificacao": "0101-01",
+      "codigoTributacaoMunicipal": "1401",
+      "discriminacao": "Desenvolvimento de sistema de gestão empresarial conforme especificações do cliente. Inclui análise, desenvolvimento, testes e documentação.",
+      "codigoMunicipioPrestacao": "3550308",
+      "quantidade": 1.0,
+      "valorUnitario": 5000.00,
+      "valorTotal": 5000.00,
+      "unidade": "UN",
+      "valorDeducoes": 0.0,
+      "valorDescontoIncondicionado": 0.0,
+      "valorDescontoCondicionado": 0.0,
+      "valorOutrasRetencoes": 0.0,
+      "valorLiquido": 5000.00,
+      "tributacao": {
+        "situacaoTributaria": "00",
+        "aliquota": 5.0,
+        "valorBaseCalculo": 5000.00,
+        "valorISS": 250.00,
+        "valorPIS": 0.0,
+        "valorCOFINS": 0.0,
+        "valorINSS": 0.0,
+        "valorIR": 0.0,
+        "valorCSLL": 0.0
+      },
+      "ibscbs": null,
+      "impostoSeletivo": null
+    }
+  ],
+  "pagamento": {
+    "formasPagamento": [
+      {
+        "meioPagamento": "17",
+        "valor": 5000.00,
+        "dataVencimento": "2026-01-15"
+      }
+    ]
+  },
+  "informacoesAdicionais": "NFS-e EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL",
+  "ibscbstot": null,
+  "valorNFSeTot": null
+}
+
