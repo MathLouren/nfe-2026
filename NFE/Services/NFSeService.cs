@@ -8,19 +8,27 @@ using System.Xml;
 namespace NFE.Services
 {
     /// <summary>
-    /// Serviço de NFS-e seguindo padrão MVC
+    /// Serviço de NFS-e seguindo padrão MVC - Sistema Nacional 2026
     /// </summary>
     public class NFSeService : INFSeService
     {
         private readonly INFSeWebServiceClient _webServiceClient;
+        private readonly SistemaNacionalNFSeClient _sistemaNacionalClient;
+        private readonly DPSService _dpsService;
         private readonly ILogger<NFSeService> _logger;
         
         // Cultura invariante para garantir ponto decimal (padrão XML)
         private static readonly CultureInfo InvariantCulture = CultureInfo.InvariantCulture;
 
-        public NFSeService(INFSeWebServiceClient webServiceClient, ILogger<NFSeService> logger)
+        public NFSeService(
+            INFSeWebServiceClient webServiceClient,
+            SistemaNacionalNFSeClient sistemaNacionalClient,
+            DPSService dpsService,
+            ILogger<NFSeService> logger)
         {
             _webServiceClient = webServiceClient;
+            _sistemaNacionalClient = sistemaNacionalClient;
+            _dpsService = dpsService;
             _logger = logger;
         }
         
@@ -46,75 +54,75 @@ namespace NFE.Services
         {
             try
             {
-                _logger.LogInformation("Processando NFS-e - Número: {Numero}", 
+                _logger.LogInformation("Processando NFS-e via Sistema Nacional - Número: {Numero}", 
                     model.Identificacao.NumeroNFSe);
 
-                // Gerar XML
-                string xml;
+                // Gerar XML DPS conforme leiautes-NSF-e
+                string xmlDPS;
                 try
                 {
-                    xml = await GerarXmlAsync(model);
-                    _logger.LogInformation("XML gerado com sucesso - Tamanho: {Tamanho} bytes", xml.Length);
+                    xmlDPS = _dpsService.GerarDPS(model);
+                    _logger.LogInformation("DPS gerado com sucesso - Tamanho: {Tamanho} bytes", xmlDPS.Length);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Erro ao gerar XML da NFS-e");
+                    _logger.LogError(ex, "Erro ao gerar DPS");
                     return new NFSeResponseViewModel
                     {
                         Sucesso = false,
-                        Mensagem = $"Erro ao gerar XML da NFS-e. Detalhes: {ex.Message}",
+                        Mensagem = $"Erro ao gerar DPS. Detalhes: {ex.Message}",
                         Erros = new Dictionary<string, string[]>
                         {
-                            { "TipoErro", new[] { "ErroGeracaoXML" } },
+                            { "TipoErro", new[] { "ErroGeracaoDPS" } },
                             { "Mensagem", new[] { ex.Message } }
                         }
                     };
                 }
 
-                // Validar XML
+                // Validar XML DPS
                 bool isValid;
                 try
                 {
-                    isValid = await ValidarXmlAsync(xml);
+                    isValid = await ValidarXmlAsync(xmlDPS);
                     if (!isValid)
                     {
-                        _logger.LogWarning("XML gerado é inválido");
+                        _logger.LogWarning("DPS gerado é inválido");
                         return new NFSeResponseViewModel
                         {
                             Sucesso = false,
-                            Mensagem = "XML gerado é inválido",
-                            XmlEnviado = xml,
+                            Mensagem = "DPS gerado é inválido",
+                            XmlEnviado = xmlDPS,
                             Erros = new Dictionary<string, string[]>
                             {
-                                { "TipoErro", new[] { "XMLInvalido" } }
+                                { "TipoErro", new[] { "DPSInvalido" } }
                             }
                         };
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Erro ao validar XML da NFS-e");
+                    _logger.LogError(ex, "Erro ao validar DPS");
                     return new NFSeResponseViewModel
                     {
                         Sucesso = false,
-                        Mensagem = $"Erro ao validar XML da NFS-e. Detalhes: {ex.Message}",
-                        XmlEnviado = xml,
+                        Mensagem = $"Erro ao validar DPS. Detalhes: {ex.Message}",
+                        XmlEnviado = xmlDPS,
                         Erros = new Dictionary<string, string[]>
                         {
-                            { "TipoErro", new[] { "ErroValidacaoXML" } },
+                            { "TipoErro", new[] { "ErroValidacaoDPS" } },
                             { "Mensagem", new[] { ex.Message } }
                         }
                     };
                 }
 
-                // Enviar para webservice
-                var resposta = await _webServiceClient.EnviarNFSeAsync(xml, ambiente);
+                // Enviar DPS para Sistema Nacional NFS-e
+                var resposta = await _sistemaNacionalClient.EnviarDPSAsync(xmlDPS, ambiente);
 
                 return new NFSeResponseViewModel
                 {
                     Sucesso = resposta.Sucesso,
                     Mensagem = resposta.Mensagem ?? "Processamento concluído",
-                    XmlEnviado = xml,
+                    XmlEnviado = xmlDPS,
                     XmlRetorno = resposta.XmlRetorno,
                     Protocolo = resposta.Protocolo,
                     NumeroNFSe = resposta.NumeroNFSe,
@@ -125,7 +133,8 @@ namespace NFE.Services
                     Erros = resposta.Erros?.ToDictionary(
                         kvp => kvp.Key,
                         kvp => new[] { kvp.Value }
-                    )
+                    ),
+                    DataProcessamento = DateTime.Now
                 };
             }
             catch (Exception ex)
@@ -150,69 +159,10 @@ namespace NFE.Services
             {
                 try
                 {
-                    _logger.LogInformation("Iniciando geração de XML da NFS-e");
+                    _logger.LogInformation("Iniciando geração de DPS (XML)");
                     
-                    // Namespace padrão NFS-e Nacional 2026
-                    var ns = XNamespace.Get("http://www.portalfiscal.inf.br/nfse");
-                    
-                    // Gerar código de verificação (8 dígitos aleatórios)
-                    string codigoVerificacao = GerarCodigoVerificacao();
-                    
-                    _logger.LogInformation("Código de verificação gerado: {Codigo}", codigoVerificacao);
-                    
-                    var nfse = new XElement(ns + "NFSe");
-
-                    var infNFSe = new XElement(ns + "infNFSe",
-                        new XAttribute("Id", $"NFSe{model.Identificacao.NumeroNFSe}{codigoVerificacao}"),
-                        new XAttribute("versao", "1.00")
-                    );
-
-                    // 1. Identificação
-                    infNFSe.Add(CriarIdentificacao(model, ns, codigoVerificacao));
-                    
-                    // 2. Prestador
-                    infNFSe.Add(CriarPrestador(model, ns));
-                    
-                    // 3. Tomador
-                    infNFSe.Add(CriarTomador(model, ns));
-                    
-                    // 4. Serviços
-                    int nItem = 1;
-                    foreach (var servico in model.Servicos)
-                    {
-                        infNFSe.Add(CriarServico(servico, ns, nItem++));
-                    }
-
-                    // 5. Totais
-                    infNFSe.Add(CriarTotal(model, ns));
-
-                    // 6. Pagamento (se houver)
-                    if (model.Pagamento?.FormasPagamento != null && 
-                        model.Pagamento.FormasPagamento.Any())
-                    {
-                        infNFSe.Add(CriarPagamento(model.Pagamento, ns));
-                    }
-
-                    // 7. Informações Adicionais
-                    if (!string.IsNullOrEmpty(model.InformacoesAdicionais))
-                    {
-                        var infAdic = new XElement(ns + "infAdic");
-                        infAdic.Add(new XElement(ns + "infCpl", model.InformacoesAdicionais));
-                        infNFSe.Add(infAdic);
-                    }
-
-                    nfse.Add(infNFSe);
-
-                    var xmlDocument = new XDocument(
-                        new XDeclaration("1.0", "UTF-8", null),
-                        nfse
-                    );
-
-                    string xmlString = xmlDocument.ToString(SaveOptions.DisableFormatting);
-                    
-                    _logger.LogInformation("XML gerado - Tamanho: {Size} bytes", xmlString.Length);
-                    
-                    return xmlString;
+                    // Gerar DPS conforme leiautes-NSF-e
+                    return _dpsService.GerarDPS(model);
                 }
                 catch (Exception ex)
                 {
